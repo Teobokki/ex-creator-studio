@@ -132,6 +132,8 @@ class Slide(tk.Frame):
 
 
 class ArtPanel(tk.Frame):
+    TOOL_LIST = TOOLS
+    PICK_ALL = False        # Move tool auto-select may also pick the bottom layer
     def __init__(self, master, app, ui):
         super().__init__(master, bg=ui.BG)
         self.app, self.ui = app, ui
@@ -190,7 +192,7 @@ class ArtPanel(tk.Frame):
         # --- left toolbar
         tb = tk.Frame(main, bg=P, highlightthickness=1, highlightbackground=BORDER); tb.pack(side="left", fill="y")
         grid = tk.Frame(tb, bg=P); grid.pack(side="top", padx=4, pady=6)
-        for i, (key, label, sc, ic) in enumerate(TOOLS):
+        for i, (key, label, sc, ic) in enumerate(self.TOOL_LIST):
             self.icons[key] = ImageTk.PhotoImage(icon(ic, 20))
             l = tk.Label(grid, image=self.icons[key], bg=P, width=34, height=32, cursor="hand2")
             l.grid(row=i // 2, column=i % 2, padx=1, pady=1)
@@ -817,7 +819,7 @@ class ArtPanel(tk.Frame):
             l.configure(bg=self.ui.RED if kk == k else self.ui.PANEL)
         self.cv.configure(cursor={"hand": "fleur", "move": "fleur", "zoom": "plus", "text": "xterm", "eyedropper": "tcross"}.get(k, "crosshair"))
         self._opts_refresh(); self._draw_overlays()
-        lab = [t for t in TOOLS if t[0] == k][0]
+        lab = [t for t in self.TOOL_LIST if t[0] == k][0]
         self._status("%s  (%s)" % (lab[1], lab[2]))
 
     def _sz_key(self):
@@ -850,7 +852,7 @@ class ArtPanel(tk.Frame):
         o = self.opts
         for w in o.winfo_children(): w.destroy()
         ui = self.ui; P = ui.PANEL; t = self.tool
-        lab = [x for x in TOOLS if x[0] == t][0][1]
+        lab = [x for x in self.TOOL_LIST if x[0] == t][0][1]
         if self.tf: lab = "Free transform"
         tk.Label(o, text=lab.upper(), bg=P, fg=ui.TXT, font=(ui.FONT, 8, "bold")).pack(side="left", padx=(10, 4))
         S = lambda *a, **k: Slide(o, ui, *a, **k).pack(side="left", padx=(10, 0))
@@ -997,7 +999,7 @@ class ArtPanel(tk.Frame):
         if d.sel is None and self.opt.get("auto_pick", True):
             xi, yi = int(x), int(y)
             if 0 <= xi < d.w and 0 <= yi < d.h:
-                for i in range(len(d.layers) - 1, 0 if len(d.layers) > 1 else -1, -1):
+                for i in range(len(d.layers) - 1, 0 if (len(d.layers) > 1 and not self.PICK_ALL) else -1, -1):
                     l = d.layers[i]
                     if l.visible and not l.locked and l.px[yi, xi, 3] > 8:
                         if i != d.active: d.active = i; self.edit_mask = False; self.draw_layers()
@@ -1504,7 +1506,7 @@ class ArtPanel(tk.Frame):
             def small(a, interp=cv2.INTER_AREA):
                 return None if a is None else cv2.resize(np.ascontiguousarray(a[vy0:vy1, vx0:vx1]), (tw, th), interpolation=interp)
             L = tf["L"]; i = d.layers.index(L)
-            chk = small(self.chk); bg = chk[..., None].astype(np.float32) * (1 / 255.0)
+            bg = self._tf_bg(small)
             mk = lambda l: NS(id=l.id, visible=True, opacity=l.opacity, blend=l.blend, px=small(l.px), mask=small(l.mask))
             rgb, _ = C.composite([mk(l) for l in d.layers[:i] if l.visible], 0, 0, tw, th, bg=bg)
             under = np.concatenate([C.to_u8(rgb), np.full((th, tw, 1), 255, np.uint8)], 2)
@@ -1561,6 +1563,9 @@ class ArtPanel(tk.Frame):
         rgb, _ = C.composite([pc["under"], act] + pc["above"], 0, 0, tw, th, bg=np.zeros((th, tw, 1), np.float32))
         self.render_view(preview=C.to_u8(rgb)); self._tf_label(); tf["stale"] = True
         return True
+
+    def _tf_bg(self, small):
+        return small(self.chk)[..., None].astype(np.float32) * (1 / 255.0)
 
     def _tf_label(self):
         if self.tf and getattr(self, "tf_lbl", None) is not None and self.tf_lbl.winfo_exists():
@@ -2096,7 +2101,7 @@ class ArtPanel(tk.Frame):
             return "break"
         if len(ks) == 1:
             kk = ks.upper() if (sh and ks.lower() in ("g", "r")) else ks.lower()
-            if kk in KEYMAP: self.set_tool(KEYMAP[kk]); return "break"
+            if kk in KEYMAP and any(t[0] == KEYMAP[kk] for t in self.TOOL_LIST): self.set_tool(KEYMAP[kk]); return "break"
         if ks.isdigit() and self.tool in ("brush", "eraser", "pencil", "clone"):
             v = int(ks) or 10; self.opt["opacity"] = v / 10.0; self._opts_refresh(); return "break"
         return None

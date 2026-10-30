@@ -17,6 +17,26 @@ The **REX BOARD** shows one character or piece of art. It is the screen the app 
 - **Download.** Renders the lip-sync animation and the voice into an H.264/AAC MP4. It saves to `Downloads\EX CREATOR STUDIO <date time>.mp4`.
 - **Check for updates.** Reads `latest.json` from this repo and installs newer versions.
 
+## New in 1.5.0
+### REX ANIMATE - frame-by-frame 2D animation
+Open the **REX ANIMATE** tab to turn stickman drawings into a video.
+- **Canvas:** white by default. Presets are 1920×1080 (the default), 1080×1920 vertical and 1080×1080 square.
+- **Timeline:** a strip of frames with thumbnails. You can add, duplicate, insert a blank, delete, copy and paste frames, and drag them to reorder. **Hold** shows one drawing for N frames: use the − / + buttons or double-click a frame.
+- **Playback:** 6, 8, 12, 24 or 30 fps (12 is the default), with Play / Pause (P), Loop and *From here*. Step with the buttons or the **,** and **.** keys; Home and End jump to the first and last frame.
+- **Layers:** each frame has up to 5 drawing layers with visibility, opacity, lock and reorder. Text layers don't count toward the 5. A shared **background** (a colour or an image) sits under every frame.
+- **Tools:** brush and pen with **Smoothing** (a stabiliser), pencil, eraser and fill. The lasso can move, scale and rotate a selection. Line, rectangle and ellipse shapes, the eyedropper, zoom and pan work as in EX ART.
+- **Colour wheel:** the same one as EX ART. It has an HSV wheel and square, brightness down to 0, hex input, 64 swatches (black and white first) and recent colours. Black is the default.
+- **Text:** font, size, colour, bold, outline and colour, and drop shadow. Text stays **editable**: move, resize and rotate it with the Move tool, and double-click to change it. It can stay on a **range of frames**, which suits titles and captions.
+- **Import:** drop or paste (Ctrl+V) images and screenshots onto a frame, then move and resize them. You can also set a background image.
+- **Audio:** add an MP3 or WAV track. It shows as a waveform on the timeline and plays with the animation. Scrub the waveform for frame-accurate sound.
+- **Export:** MP4 (H.264, plus AAC when there is audio) at 1080p or 720p, a GIF, or a PNG sequence, saved to Videos or Downloads. *Smooth video* writes a standard 24 / 30 fps file that holds each drawing. **EX STUDIO** sends the video straight to EX STUDIO.
+- **Projects:** `.rexanim` files store frames, layers, text, background and audio. Autosave runs every 2 minutes (File → Recover autosave), and each frame has its own undo / redo.
+- **Sample:** File → *Open the sample*. REX, the red-haired stickman, walks in, waves and jumps.
+- Onion skin is off by default; a small toggle on the timeline turns it on.
+
+![REX ANIMATE](docs/screenshot_rex_animate.png)
+![REX ANIMATE text](docs/screenshot_rex_animate_text.png)
+
 ## New in 1.4.0
 ### EX ART - a layered image editor
 Open the **EX ART** tab to paint, edit photos and lay out thumbnails.

@@ -5,7 +5,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
 APP = "EX CREATOR STUDIO"
-APP_VERSION = "1.4.0"
+APP_VERSION = "1.5.0"
 COPYRIGHT = "\u00a92026 EX Inc./HYPERION DIGITAL \u00a92026"
 REPO = "Teobokki/ex-creator-studio"
 UPDATE_URL = "https://raw.githubusercontent.com/%s/main/latest.json" % REPO
@@ -197,11 +197,11 @@ class Studio(tk.Tk):
         tk.Label(top, text="  v" + APP_VERSION, bg=PANEL, fg=MUT, font=(FONT, 9)).pack(side="left", pady=(6, 0))
         Btn(top, "\u27f3  Check for updates", self.check_updates, fill=PANEL, fg=MUT, hover=CARD2,
             font=(FONT, 9, "bold")).pack(side="right", padx=12)
-        nav = tk.Frame(top, bg=PANEL); nav.pack(side="left", padx=(28, 0), fill="y")
+        nav = tk.Frame(top, bg=PANEL); nav.pack(side="left", padx=(12, 0), fill="y")
         self.tabs = {}
-        for key, label in (("home", "\u2302  REX BOARD"), ("studio", "\u25c9  EX STUDIO"), ("art", "\u270e  EX ART"), ("rec", "\u25cf  EX SCREEN RECORDER 2026")):
+        for key, label in (("home", "\u2302  REX BOARD"), ("studio", "\u25c9  EX STUDIO"), ("art", "\u270e  EX ART"), ("anim", "\u25b6  REX ANIMATE"), ("rec", "\u25cf  EX SCREEN RECORDER 2026")):
             f = tk.Frame(nav, bg=PANEL); f.pack(side="left", padx=2, fill="y")
-            l = tk.Label(f, text=label, bg=PANEL, fg=MUT, font=(FONT, 10, "bold"), padx=14, pady=8, cursor="hand2")
+            l = tk.Label(f, text=label, bg=PANEL, fg=MUT, font=(FONT, 10, "bold"), padx=7, pady=8, cursor="hand2")
             l.pack(side="top", fill="y", expand=True)
             u = tk.Frame(f, bg=PANEL, height=3); u.pack(side="bottom", fill="x")
             l.bind("<Button-1>", lambda e, k=key: self.show_tab(k))
@@ -211,6 +211,7 @@ class Studio(tk.Tk):
         self.home = tk.Frame(self.body, bg=BG)
         self.studio = None
         self.art = None
+        self.anim = None
         self.screenrec = None
         self.last_rec = "rec"
         self.tab = None
@@ -267,8 +268,8 @@ class Studio(tk.Tk):
         self.cv.bind("<Button-5>", lambda e: self._wheel(e, -120))
         self.bind("<Delete>", lambda e: self.tab == "home" and self.focus_get() is not self.text and self.remove_shot())
         self.bind("<Escape>", lambda e: self.set_mouth_mode(False) if self.tab == "home" else (self.studio.escape() if self.tab == "studio" else None))
-        self.bind_all("<KeyPress>", lambda e: self.art.key(e) if (self.tab == "art" and self.art is not None) else None, add="+")
-        self.bind_all("<KeyRelease>", lambda e: self.art.key_up(e) if (self.tab == "art" and self.art is not None) else None, add="+")
+        self.bind_all("<KeyPress>", self._key_any, add="+")
+        self.bind_all("<KeyRelease>", self._key_up_any, add="+")
         self._update_chip()
 
     def _make_studio(self):
@@ -280,6 +281,18 @@ class Studio(tk.Tk):
     def _make_art(self):
         import ecs_art
         self.art = ecs_art.ArtPanel(self.body, self, sys.modules[__name__])
+
+    def _key_any(self, e):
+        p = self.art if self.tab == "art" else (self.anim if self.tab == "anim" else None)
+        return p.key(e) if p is not None else None
+
+    def _key_up_any(self, e):
+        p = self.art if self.tab == "art" else (self.anim if self.tab == "anim" else None)
+        return p.key_up(e) if p is not None else None
+
+    def _make_anim(self):
+        import ecs_anim
+        self.anim = ecs_anim.AnimPanel(self.body, self, sys.modules[__name__])
 
     def _make_rec(self):
         import ecs_screenrec
@@ -302,6 +315,8 @@ class Studio(tk.Tk):
             self._make_studio()
         if key == "art" and self.art is None:
             self._make_art()
+        if key == "anim" and self.anim is None:
+            self._make_anim()
         if key == "rec" and self.screenrec is None:
             self._make_rec()
         if key in ("rec", "studio"):
@@ -312,9 +327,11 @@ class Studio(tk.Tk):
             self.studio.leave(); self.studio.pack_forget()
         elif self.tab == "art":
             self.art.leave(); self.art.pack_forget()
+        elif self.tab == "anim":
+            self.anim.leave(); self.anim.pack_forget()
         elif self.tab == "rec":
             self.screenrec.leave(); self.screenrec.pack_forget()
-        {"home": self.home, "studio": self.studio, "art": self.art, "rec": self.screenrec}[key].pack(fill="both", expand=True)
+        {"home": self.home, "studio": self.studio, "art": self.art, "anim": self.anim, "rec": self.screenrec}[key].pack(fill="both", expand=True)
         self.tab = key
         for k, (l, u) in self.tabs.items():
             l.configure(fg=TXT if k == key else MUT); u.configure(bg=RED if k == key else PANEL)
@@ -821,6 +838,9 @@ class Studio(tk.Tk):
         self.player.stop()
         if self.screenrec is not None:
             if not self.screenrec.close():
+                return
+        if self.anim is not None:
+            if not self.anim.close():
                 return
         if self.art is not None:
             if not self.art.close():
