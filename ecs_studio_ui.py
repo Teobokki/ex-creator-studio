@@ -201,7 +201,9 @@ class StudioPanel(tk.Frame):
         return None
 
     def _hotkey(self):
-        self.toggle_record(from_hotkey=True)
+        route = getattr(self.app, "route_rec_hotkey", None)
+        if route is not None: route()
+        else: self.toggle_record(from_hotkey=True)
 
     def toggle_record(self, from_hotkey=False):
         if self.rec.running():

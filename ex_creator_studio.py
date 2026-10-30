@@ -5,7 +5,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
 APP = "EX CREATOR STUDIO"
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.4.0"
 COPYRIGHT = "\u00a92026 EX Inc./HYPERION DIGITAL \u00a92026"
 REPO = "Teobokki/ex-creator-studio"
 UPDATE_URL = "https://raw.githubusercontent.com/%s/main/latest.json" % REPO
@@ -199,7 +199,7 @@ class Studio(tk.Tk):
             font=(FONT, 9, "bold")).pack(side="right", padx=12)
         nav = tk.Frame(top, bg=PANEL); nav.pack(side="left", padx=(28, 0), fill="y")
         self.tabs = {}
-        for key, label in (("home", "\u2302  REX BOARD"), ("studio", "\u25c9  EX STUDIO")):
+        for key, label in (("home", "\u2302  REX BOARD"), ("studio", "\u25c9  EX STUDIO"), ("art", "\u270e  EX ART"), ("rec", "\u25cf  EX SCREEN RECORDER 2026")):
             f = tk.Frame(nav, bg=PANEL); f.pack(side="left", padx=2, fill="y")
             l = tk.Label(f, text=label, bg=PANEL, fg=MUT, font=(FONT, 10, "bold"), padx=14, pady=8, cursor="hand2")
             l.pack(side="top", fill="y", expand=True)
@@ -210,6 +210,9 @@ class Studio(tk.Tk):
         self.body = tk.Frame(self, bg=BG); self.body.pack(fill="both", expand=True)
         self.home = tk.Frame(self.body, bg=BG)
         self.studio = None
+        self.art = None
+        self.screenrec = None
+        self.last_rec = "rec"
         self.tab = None
         self.show_tab("home")
 
@@ -263,7 +266,9 @@ class Studio(tk.Tk):
         self.cv.bind("<Button-4>", lambda e: self._wheel(e, 120))
         self.cv.bind("<Button-5>", lambda e: self._wheel(e, -120))
         self.bind("<Delete>", lambda e: self.tab == "home" and self.focus_get() is not self.text and self.remove_shot())
-        self.bind("<Escape>", lambda e: self.set_mouth_mode(False) if self.tab == "home" else self.studio.escape())
+        self.bind("<Escape>", lambda e: self.set_mouth_mode(False) if self.tab == "home" else (self.studio.escape() if self.tab == "studio" else None))
+        self.bind_all("<KeyPress>", lambda e: self.art.key(e) if (self.tab == "art" and self.art is not None) else None, add="+")
+        self.bind_all("<KeyRelease>", lambda e: self.art.key_up(e) if (self.tab == "art" and self.art is not None) else None, add="+")
         self._update_chip()
 
     def _make_studio(self):
@@ -272,17 +277,44 @@ class Studio(tk.Tk):
         if self.voices:
             self.studio.set_voices(self.voices)
 
+    def _make_art(self):
+        import ecs_art
+        self.art = ecs_art.ArtPanel(self.body, self, sys.modules[__name__])
+
+    def _make_rec(self):
+        import ecs_screenrec
+        self.screenrec = ecs_screenrec.ScreenRecPanel(self.body, self, sys.modules[__name__])
+
+    def route_rec_hotkey(self):
+        """Ctrl+Shift+R is shared by the two recorders: the one that is recording, else the one used last."""
+        sr, stu = self.screenrec, self.studio
+        if sr is not None and sr.is_active(): sr.toggle(); return
+        if stu is not None and stu.rec.running(): stu.toggle_record(from_hotkey=True); return
+        if self.last_rec == "studio" and stu is not None: stu.toggle_record(from_hotkey=True); return
+        if sr is not None: sr.toggle(); return
+        if stu is not None: stu.toggle_record(from_hotkey=True)
+
     def show_tab(self, key):
-        """REX BOARD is the default screen; EX STUDIO is a separate panel built the first time it's opened."""
+        """REX BOARD is the default screen; EX STUDIO and EX ART are separate panels built the first time they're opened."""
         if key == self.tab:
             return
         if key == "studio" and self.studio is None:
             self._make_studio()
+        if key == "art" and self.art is None:
+            self._make_art()
+        if key == "rec" and self.screenrec is None:
+            self._make_rec()
+        if key in ("rec", "studio"):
+            self.last_rec = key
         if self.tab == "home":
             self.stop(); self.set_mouth_mode(False); self.home.pack_forget()
         elif self.tab == "studio":
             self.studio.leave(); self.studio.pack_forget()
-        (self.home if key == "home" else self.studio).pack(fill="both", expand=True)
+        elif self.tab == "art":
+            self.art.leave(); self.art.pack_forget()
+        elif self.tab == "rec":
+            self.screenrec.leave(); self.screenrec.pack_forget()
+        {"home": self.home, "studio": self.studio, "art": self.art, "rec": self.screenrec}[key].pack(fill="both", expand=True)
         self.tab = key
         for k, (l, u) in self.tabs.items():
             l.configure(fg=TXT if k == key else MUT); u.configure(bg=RED if k == key else PANEL)
@@ -787,6 +819,12 @@ class Studio(tk.Tk):
     def on_close(self):
         self.playing = False
         self.player.stop()
+        if self.screenrec is not None:
+            if not self.screenrec.close():
+                return
+        if self.art is not None:
+            if not self.art.close():
+                return
         if self.studio is not None:
             if not self.studio.close():
                 return

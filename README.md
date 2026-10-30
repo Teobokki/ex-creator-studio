@@ -17,6 +17,54 @@ The **REX BOARD** shows one character or piece of art. It is the screen the app 
 - **Download.** Renders the lip-sync animation and the voice into an H.264/AAC MP4. It saves to `Downloads\EX CREATOR STUDIO <date time>.mp4`.
 - **Check for updates.** Reads `latest.json` from this repo and installs newer versions.
 
+## New in 1.4.0
+### EX ART - a layered image editor
+Open the **EX ART** tab to paint, edit photos and lay out thumbnails.
+- **Canvas:** 1920×1080, 1080×1080, 4K, HD, portrait, A4 or a custom size. The background is white by default; black, transparent or your second colour are options. Opens PNG, JPG and WEBP.
+- **Layers:** add, delete, duplicate, rename, drag to reorder, hide, lock, opacity, and blend modes (Normal, Multiply, Screen, Overlay, Add, Darken, Lighten). Also merge down, flatten and layer masks.
+- **Tools** (with shortcuts):
+  - Move (V), Marquee (M), Lasso (L), Selection brush (Q), Crop (C), Eyedropper (I).
+  - Brush (B), Pencil (N), Eraser (E), Fill with tolerance (G), Gradient (Shift+G), Text (T), Shapes (U).
+  - Smudge (R), Blur/Sharpen (Shift+R), Clone stamp (S), Hand (H or Space-drag), Zoom (Z or the mouse wheel).
+  - The brush has size, hardness, opacity and flow, and uses pen pressure with Windows Ink pens.
+- **Colour:**
+  - HSV ring and square (reaches pure black and pure white), hex input and a brightness slider down to 0.
+  - Primary and secondary colours; black is the primary and white the secondary by default.
+  - 64 swatches, black and white first, then the full spectrum, greys, skin tones, pastels and neons. Recent colours are kept too.
+- **Adjust and Filter:** brightness/contrast, hue/saturation, levels, invert, grayscale, Gaussian blur, sharpen, noise, and cinematic looks (Teal & Orange, Noir, Warm Film, Cold Night, Faded Matte, Bleach Bypass, Golden Hour).
+- **Transform:** free transform (Ctrl+T), flip, rotate and resize the canvas. Undo/redo keeps 80 steps (Ctrl+Z / Ctrl+Y), and a History panel lets you click back to any step.
+- **Files:** save a `.exart` project with all its layers (Ctrl+S). Export PNG, JPG or transparent PNG to Pictures or Downloads, or send the picture to REX BOARD or EX STUDIO.
+
+**Screenshots and images on the canvas.** There are several ways to put a screenshot or image on the canvas; each one goes on its own new layer:
+- **Add image** (several files at once).
+- Drag files from Explorer onto the canvas.
+- **Ctrl+V**, for example after PrtScn or Win+Shift+S.
+- The **Screenshot** button.
+
+How to adjust a placed image:
+- **Move and resize:** drag inside the box to move it. Drag a corner or side handle to resize; Shift keeps the aspect ratio.
+- **Rotate:** drag the red handle (Shift snaps to 15°).
+- **Apply:** press Enter or click outside the box.
+- **Later changes:** click the image again with the Move tool to move or resize it.
+
+![EX ART](docs/screenshot_ex_art.png)
+![Placing a screenshot](docs/screenshot_ex_art_images.png)
+
+### EX SCREEN RECORDER 2026
+A new tab that records your screen to a YouTube-ready MP4 (H.264 High + AAC 48 kHz, +faststart).
+- **What to record:** the full screen, one monitor, one window or a region you drag out.
+- **Quality:** 720p30, 1080p30 or 1080p60. Smaller sources are never upscaled.
+- **Sound:** system audio only (what you hear, via WASAPI loopback), with an on/off toggle and a level meter. A microphone is never recorded.
+- **Controls:**
+  - An optional 3-2-1 countdown, Pause/Resume and a recording timer.
+  - A small floating Stop/Pause button that is kept out of the video on Windows 10 2004 and later.
+  - Global hotkeys that also work while the app is minimised: **Ctrl+Shift+R** starts or stops, and **Ctrl+Shift+F9** pauses or resumes.
+- **Saving:** recordings go to **Videos** or **Downloads** as `EX SCREEN RECORDER 2026 <date time>.mp4`.
+- **Recent recordings:** the list has Open, Show in folder and Delete, plus **Send frame to EX ART**.
+- Nothing is ever uploaded.
+
+![EX SCREEN RECORDER 2026](docs/screenshot_screen_recorder.png)
+
 ## New in 1.3.0
 - The main board (the one the app opens on) is now called **REX BOARD**. It works exactly the same: the app still opens on it and it starts empty.
 - Updates now come from [Teobokki/ex-creator-studio](https://github.com/Teobokki/ex-creator-studio/releases).

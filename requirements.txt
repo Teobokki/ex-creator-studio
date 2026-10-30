@@ -4,3 +4,4 @@ pillow
 imageio-ffmpeg
 comtypes
 pyinstaller
+soundcard==0.4.5
