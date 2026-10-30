@@ -1,12 +1,12 @@
 {
-  "version": "1.4.0",
-  "url": "https://github.com/Teobokki/ex-creator-studio/releases/download/v1.4.0/EX.CREATOR.STUDIO.Setup.1.4.0.exe",
-  "installer_url": "https://github.com/Teobokki/ex-creator-studio/releases/download/v1.4.0/EX.CREATOR.STUDIO.Setup.1.4.0.exe",
-  "full_url": "https://github.com/Teobokki/ex-creator-studio/releases/download/v1.4.0/EX.CREATOR.STUDIO.zip",
-  "portable_url": "https://github.com/Teobokki/ex-creator-studio/releases/download/v1.4.0/EX.CREATOR.STUDIO.zip",
-  "release_url": "https://github.com/Teobokki/ex-creator-studio/releases/tag/v1.4.0",
-  "sha256": "f832ebe9af2a34898a40acbef967c132e68c2cbfada098589d67ed1489c1013c",
-  "zip_sha256": "6951819aad11cbc12b1c9e315cdf2f0e3c060fb8b0e279ec6de91aded27375fa",
+  "version": "1.5.0",
+  "url": "https://github.com/Teobokki/ex-creator-studio/releases/download/v1.5.0/EX.CREATOR.STUDIO.Setup.1.5.0.exe",
+  "installer_url": "https://github.com/Teobokki/ex-creator-studio/releases/download/v1.5.0/EX.CREATOR.STUDIO.Setup.1.5.0.exe",
+  "full_url": "https://github.com/Teobokki/ex-creator-studio/releases/download/v1.5.0/EX.CREATOR.STUDIO.zip",
+  "portable_url": "https://github.com/Teobokki/ex-creator-studio/releases/download/v1.5.0/EX.CREATOR.STUDIO.zip",
+  "release_url": "https://github.com/Teobokki/ex-creator-studio/releases/tag/v1.5.0",
+  "sha256": "abf60c828ca23c3199aefdd07ab2f279c76e557f425dda665fe50ace36251e1c",
+  "zip_sha256": "88b62d2c2d87d6c83db6d5da3726dca30abd849f4e009ed6b194318b7648aef8",
   "released": "2026-10-30",
-  "notes": "New: EX ART layered image editor (place, move and resize screenshots) and EX SCREEN RECORDER 2026 (screen, monitor, window or region; system audio only; MP4)."
+  "notes": "New: REX ANIMATE frame-by-frame animation - timeline with holds, layers, colour wheel, editable text over frame ranges, screenshots, audio track and MP4 / GIF / PNG export."
 }
