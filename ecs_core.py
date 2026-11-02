@@ -728,6 +728,29 @@ def _lip_curve_r(gray, cx, cy, mw, xs, hw, rf):
     return off, dark
 
 
+def _seam_shift(gray, cx, cy, mw, xs, hw, off):
+    """One constant shift that puts the fitted curve on the darkest row of the seam (the search prior pulls it
+    toward the detected centre, which can leave the dark crease on one side of the split)."""
+    H, W = gray.shape[:2]
+    rad = max(1.0, 0.06 * mw)
+    t = (xs - cx) / max(1.0, hw)
+    sel = np.abs(t) < 0.6
+    if sel.sum() < 3:
+        return 0.0
+    g = cv2.GaussianBlur(gray.astype(np.float32), (0, 0), max(0.6, mw * 0.03), max(0.4, mw * 0.006))
+    d = np.arange(-math.ceil(rad), math.ceil(rad) + 1, dtype=np.float32)
+    xi = np.clip(np.round(xs[sel]).astype(int), 0, W - 1)
+    yi = np.clip(np.round(cy + off[sel][None, :] + d[:, None]).astype(int), 0, H - 1)
+    prof = g[yi, xi].mean(axis=1)
+    j = int(np.argmin(prof))
+    if 0 < j < len(d) - 1:
+        den = prof[j - 1] - 2 * prof[j] + prof[j + 1]
+        sh = float(d[j] + (0.5 * (prof[j - 1] - prof[j + 1]) / den if den > 1e-6 else 0))
+    else:
+        sh = float(d[j])
+    return float(np.clip(sh, -rad, rad)) if prof.max() - prof.min() > 2 else 0.0
+
+
 def _lip_curve(gray, cx, cy, mw, xs, hw):
     """Per-column offset of the lip line (the dark seam between the lips) from cy across the mouth, in the
     straightened patch. Follows a flat, smiling or frowning line so no strip of lip is left on the wrong side."""
@@ -735,8 +758,36 @@ def _lip_curve(gray, cx, cy, mw, xs, hw):
     off2, d2 = _lip_curve_r(gray, cx, cy, mw, xs, hw, 0.18)  # deep drawn smiles need a wider search
     if d2 < d1 - 0.08:
         off = off2
+    off = off + _seam_shift(gray, cx, cy, mw, xs, hw, off)
     u = np.abs(xs - cx) / max(1.0, hw)
     return off * (1 - _smooth((u - 1.0) / 0.3))  # ease back to the detected line beyond the corners
+
+
+def _flat_art(roi):
+    """True for drawn art (cartoon, emoji, stickman): mostly flat fills, unlike photos and paintings."""
+    if roi.size == 0 or min(roi.shape[:2]) < 4:
+        return False
+    r = roi.astype(np.int16)
+    same = ((np.abs(r[1:, 1:] - r[:-1, 1:]).max(axis=2) <= 2) & (np.abs(r[1:, 1:] - r[1:, :-1]).max(axis=2) <= 2)).mean()
+    return bool(same > 0.55)
+
+
+def _lip_mask(roi, cx, Lrow, mw, hw):
+    """Soft 0..1 mask of the lips (redder than the surrounding skin) around the mouth, in roi coords."""
+    h, w = roi.shape[:2]
+    lab = cv2.cvtColor(roi, cv2.COLOR_RGB2LAB).astype(np.float32)
+    a = cv2.GaussianBlur(lab[..., 1], (0, 0), max(0.6, mw * 0.01))
+    ys = np.arange(h, dtype=np.float32)[:, None]; xs = np.arange(w, dtype=np.float32)[None, :]
+    dy = (ys - Lrow[None, :]) / mw; dx = (xs - cx) / max(1.0, hw)
+    zone = _smooth((1.1 - np.abs(dx)) / 0.2) * _smooth((dy + 0.24) / 0.06) * _smooth((0.36 - dy) / 0.08)
+    skin = (np.abs(dx) < 1.6) & (((dy > -0.75) & (dy < -0.38)) | ((dy > 0.55) & (dy < 0.9)))
+    if skin.sum() < 10 or (zone > 0.5).sum() < 10:
+        return np.zeros((h, w), np.float32)
+    sa = float(np.median(a[skin])); la = float(np.percentile(a[zone > 0.5], 92))
+    if la - sa < 3.0:  # no visible lip colour (e.g. very pale lips): nothing to boost
+        return np.zeros((h, w), np.float32)
+    m = _smooth((a - sa - 0.45 * (la - sa)) / max(1.5, 0.35 * (la - sa))) * zone
+    return cv2.GaussianBlur(m.astype(np.float32), (0, 0), max(0.6, mw * 0.008))
 
 
 def _render_axis(base, mouth, openness, width=1.0):
@@ -751,11 +802,13 @@ def _render_axis(base, mouth, openness, width=1.0):
     mw = max(4.0, mw)
     openness = float(min(1.0, openness))
     # total opening at the centre; tiny values ease to nothing so a nearly closed mouth shows no thin slit line
-    G = openness * float(_smooth((openness - 0.05) / 0.15)) * 0.36 * mw
+    # natural speech: the lips part, they do not yawn (peak ~0.16 x mouth width at the centre)
+    wv = float(np.clip(width, 0.7, 1.3)) - 1.0                        # + = 'ee' (wider, flatter), - = 'oo' (rounder)
+    G = openness * float(_smooth((openness - 0.05) / 0.15)) * 0.2 * mw * (1.0 - 1.1 * wv)
     if G < 0.7:
         return base
-    gap, lift = G * 0.66, G * 0.34    # lower lip/jaw drops more than the upper lip rises
-    hw = 0.45 * mw * width            # half width of the opening: just inside the real corners
+    gap, lift = G * 0.62, G * 0.38    # lower lip/jaw drops a little more than the upper lip rises
+    hw = 0.43 * mw * (1.0 + 0.6 * wv)  # half width of the opening: just inside the real corners
     x0, x1 = int(max(0, cx - 1.35 * mw)), int(min(W, cx + 1.35 * mw + 1))
     y0, y1 = int(max(0, cy - 0.75 * mw)), int(min(H, cy + 1.6 * mw + 1))
     if x1 - x0 < 4 or y1 - y0 < 4:
@@ -799,33 +852,66 @@ def _render_axis(base, mouth, openness, width=1.0):
     mapy = (sy1[k] + w * (sy1[k + 1] - sy1[k])).reshape(hh, ww).astype(np.float32)
     mapx = np.broadcast_to(xs[None, :], (hh, ww)).astype(np.float32).copy()
     warped = cv2.remap(base, mapx, mapy, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE).astype(np.float32)
-    # mouth interior, only inside the gap between the moved lip edges (anti-aliased)
-    yy = oy[:, None]
-    a_in = np.clip(np.minimum(yy - top[None, :], bot[None, :] - yy) + 0.5, 0, 1) * (o[None, :] > 0)
-    hgt = np.maximum(bot - top, 1e-3)[None, :]
-    v = np.clip((yy - top[None, :]) / hgt, 0, 1)                     # 0 at upper lip, 1 at lower lip
+    roi0 = base[y0:y1, x0:x1]
+    drawn = _flat_art(roi0)                                           # cartoon / emoji / stickman: keep the drawn style
     near = base[int(max(0, cy - 0.3 * mw)):int(min(H, cy + 0.3 * mw)) + 1, int(max(0, cx - 0.5 * mw)):int(min(W, cx + 0.5 * mw)) + 1]
     near = near.reshape(-1, 3).astype(np.float32) if near.size else np.zeros((1, 3), np.float32)
     sat = float(np.mean(near.max(axis=1) - near.min(axis=1)))       # ~0 for a black-and-white photo
-    deep = np.array([10, 2, 4], np.float32)
-    warm = np.array([64, 17, 21], np.float32)
+    photo = not drawn
+    yy = oy[:, None]
+    if photo and sat >= 18:
+        # lips read clearly: as they part they show a little more of their natural rosy colour (follows the lips)
+        lm = _lip_mask(roi0, cx - x0, L - y0, mw, hw)
+        lm = cv2.remap(lm, mapx - x0, mapy - y0, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+        st = float(_smooth(openness / 0.35)) * lm
+        lab = cv2.cvtColor(np.clip(warped, 0, 255).astype(np.uint8), cv2.COLOR_RGB2LAB).astype(np.float32)
+        lab[..., 0] -= 4.5 * st; lab[..., 1] += 4.5 * st; lab[..., 2] -= 0.8 * st
+        warped = cv2.cvtColor(np.clip(lab, 0, 255).astype(np.uint8), cv2.COLOR_LAB2RGB).astype(np.float32)
+    # mouth interior, only inside the gap between the moved lip edges, with a soft edge
+    fe = max(0.8, 0.012 * mw) if photo else max(0.6, 0.008 * mw)
+    a_in = np.clip(np.minimum(yy - top[None, :], bot[None, :] - yy) / fe + 0.5, 0, 1) * (o[None, :] > 0)
+    hgt = np.maximum(bot - top, 1e-3)[None, :]
+    v = np.clip((yy - top[None, :]) / hgt, 0, 1)                     # 0 at upper lip, 1 at lower lip
     rr = np.clip(np.abs(u), 0, 1)[None, :]
-    # dark right under the upper lip and toward the corners, a little warmer low in the middle (rounded look)
-    shade = _smooth((v - 0.1) / 0.75) ** 1.3 * (1 - _smooth((rr - 0.15) / 0.7))
-    cav = deep + (warm - deep) * shade[..., None]
     Gpx = gap + lift
-    if openness > 0.4 and Gpx > 6 and sat >= 18:  # faint hint of upper teeth just under the upper lip, middle part only
-        ta = np.clip((openness - 0.4) / 0.4, 0, 1) * 0.28
-        tm = _smooth((0.13 - v) / 0.07) * _smooth((0.38 - rr) / 0.18) * ta
-        cav = cav * (1 - tm[..., None]) + np.array([182, 172, 165], np.float32) * tm[..., None]
-    if openness > 0.25:  # tongue, soft, low in the mouth
-        tg = np.clip(1 - ((u[None, :] / 0.5) ** 2 + ((v - 1.08) / 0.5) ** 2), 0, 1) ** 0.8 * 0.45 * min(1.0, openness * 1.4)
-        cav = cav * (1 - tg[..., None]) + np.array([118, 44, 50], np.float32) * tg[..., None]
-    if sat < 18:  # black-and-white picture: no colour in the mouth either
-        k = np.clip((18 - sat) / 12, 0, 1)
-        cav = cav * (1 - k) + cav.mean(axis=2, keepdims=True) * k
-    # thin shadow on the lips right at the opening edge (lip thickness), not a copy of anything
-    edge = np.clip(1 - np.minimum(np.abs(yy - top[None, :]), np.abs(yy - bot[None, :])) / max(1.0, 0.025 * mw), 0, 1) * (o[None, :] > 0.05) * 0.35
+    if photo:
+        # soft dark red, a little lighter low in the middle, darker toward the corners; never near-black
+        deep = np.array([52, 15, 19], np.float32)
+        warm = np.array([112, 42, 48], np.float32)
+        shade = _smooth((v - 0.2) / 0.45) * (1 - 0.75 * _smooth((v - 0.7) / 0.3)) * (1 - _smooth((rr - 0.1) / 0.75))
+        cav = deep + (warm - deep) * shade[..., None]
+        cav *= (1 - 0.35 * _smooth((rr - 0.55) / 0.45))[..., None]
+        if Gpx > 2.5:  # a hint of upper teeth: soft off-white band right under the upper lip, middle part only
+            ta = 0.55 * float(np.clip((Gpx - 2.5) / 4.0, 0, 1)) * (0.6 if sat < 18 else 1.0) * float(_smooth((openness - 0.15) / 0.3))
+            band = _smooth((0.4 - v) / 0.24) * _smooth((0.44 - rr) / 0.3)
+            tcol = np.array([200, 190, 180], np.float32) * ((0.62 + 0.3 * _smooth((0.4 - v) / 0.4)) * (0.8 + 0.2 * _smooth((v - 0.03) / 0.12)) * (1 - 0.35 * rr))[..., None]
+            tm = (band * ta)[..., None]
+            cav = cav * (1 - tm) + tcol * tm
+        if sat < 18:  # black-and-white picture: no colour in the mouth either (and a little deeper)
+            kk = np.clip((18 - sat) / 12, 0, 1)
+            cav = cav * (1 - kk) + cav.mean(axis=2, keepdims=True) * (0.8 * kk)
+        # the photo's own grain inside the mouth too, so it does not look painted on
+        g0 = cv2.cvtColor(roi0, cv2.COLOR_RGB2GRAY).astype(np.float32)
+        grain = float(np.clip(np.median(np.abs(g0 - cv2.GaussianBlur(g0, (0, 0), 1.2))) * 1.4, 0, 6))
+        if grain > 0.4:
+            nz = np.random.RandomState(7).normal(0, grain, cav.shape[:2]).astype(np.float32)
+            cav = cav + (nz * (0.35 + 0.65 * (cav.mean(axis=2) / 120.0)))[..., None]
+        edge_k = 0.18
+    else:
+        deep = np.array([18, 4, 7], np.float32)
+        warm = np.array([70, 20, 26], np.float32)
+        shade = _smooth((v - 0.1) / 0.75) ** 1.3 * (1 - _smooth((rr - 0.15) / 0.7))
+        cav = deep + (warm - deep) * shade[..., None]
+        if sat < 18:
+            kk = np.clip((18 - sat) / 12, 0, 1)
+            cav = cav * (1 - kk) + cav.mean(axis=2, keepdims=True) * kk
+        edge_k = 0.3
+    # a soft shadow on the lips right at the opening edge (lip thickness), not a copy of anything
+    ew = max(1.0, 0.03 * mw)
+    e_top = np.clip(1 - np.abs(yy - top[None, :]) / ew, 0, 1)
+    # under the opening the lower lip curls in, a touch deeper toward the corners (hides any sliver of the old seam)
+    e_bot = np.clip(1 - np.abs(yy - bot[None, :]) / (1.5 * ew), 0, 1) * (1 + 1.2 * _smooth((rr - 0.45) / 0.4))
+    edge = np.clip(np.maximum(e_top, e_bot) * edge_k, 0, 0.6) * (o[None, :] > 0.05)
     warped *= (1 - edge * (1 - a_in))[..., None]
     out_roi = warped * (1 - a_in[..., None]) + cav * a_in[..., None]
     out = base.copy()

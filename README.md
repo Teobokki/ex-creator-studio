@@ -18,6 +18,14 @@ The **REX BOARD** shows one character or piece of art. It is the screen the app 
 - **Download.** Renders the lip-sync animation and the voice into an H.264/AAC MP4. It saves to `Downloads\EX CREATOR STUDIO <date time>.mp4`.
 - **Check for updates.** Reads `latest.json` from this repo and installs newer versions.
 
+## New in 1.5.5
+
+- Lip sync now looks like the store presenter: both lips stay full and keep their shape, real photos get a natural rosy lip tone (no lipstick look), and the mouth opens to a soft dark-red gap with a hint of upper teeth, lighter low in the middle and tapering into the corners.
+- Natural speech peaks (parted lips, not a yawn), closing between syllables, rounder for o/u and wider/flatter for e/i.
+- The mouth interior keeps the photo's own grain; black-and-white photos stay black-and-white.
+- Drawn, cartoon and stickman faces keep their drawn style with a softer, modest opening.
+- Same in the REX BOARD preview, the EX STUDIO square and exported MP4s.
+
 ## New in 1.5.4
 ### One natural mouth, on the real lips
 - When the character talks, the real upper lip now moves up and the real lower lip and jaw move down. Only the gap that opens between them is filled, with a dark, rounded mouth inside.
