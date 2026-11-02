@@ -130,15 +130,31 @@ def probe(path):
 
 # ----------------------------------------------------------------------------- character square
 def make_square(rgb):
-    """Webcam-style square crop of the character (centred on the face if one is found) + mouth in square coords."""
-    kind, face, mouth = core.detect_mouth(rgb)
+    sq, kind, m, _ = make_square_ex(rgb)
+    return sq, kind, m
+
+
+def make_square_ex(rgb, mouth=None, manual=False):
+    """Webcam-style square crop of the character (centred on the face if one is found) + mouth in square coords.
+    mouth/manual: use this mouth spot (image pixels, None = no lip sync) instead of detecting one.
+    Returns (square, kind, mouth_in_square, (x0, y0, scale)) - img = sq / scale + (x0, y0)."""
+    kind, face, det = core.detect_mouth(rgb)
+    if manual:
+        kind = "manual" if mouth is not None else None
+    else:
+        mouth = det
     h, w = rgb.shape[:2]
-    if face is not None:
+    if face is not None and (mouth is None or (face[0] - face[2] * 0.2 <= mouth[0] <= face[0] + face[2] * 1.2
+                                               and face[1] <= mouth[1] <= face[1] + face[3] * 1.4)):
         fx, fy, fw, fh = face
         side = int(min(min(w, h), max(fw, fh) * 2.3))
         cx, cy = fx + fw / 2, fy + fh * 0.55
+    elif mouth is not None:  # no face box: frame around the mouth
+        side = int(min(min(w, h), max(mouth[2] * 6.5, min(w, h) * 0.25)))
+        cx, cy = mouth[0], mouth[1] - side * 0.12
     else:
         side = min(w, h); cx, cy = w / 2, h / 2
+    side = max(2, side)
     x0 = int(np.clip(cx - side / 2, 0, w - side)); y0 = int(np.clip(cy - side / 2, 0, h - side))
     crop = rgb[y0:y0 + side, x0:x0 + side]
     s = SQ / float(side)
@@ -147,8 +163,8 @@ def make_square(rgb):
     if mouth is not None:
         m = ((mouth[0] - x0) * s, (mouth[1] - y0) * s, mouth[2] * s, mouth[3] * s)
         if not (0 <= m[0] < SQ and 0 <= m[1] < SQ):
-            m, kind = None, None
-    return np.ascontiguousarray(sq), (kind if m is not None else None), m
+            m = None
+    return np.ascontiguousarray(sq), (kind if m is not None else None), m, (x0, y0, s)
 
 
 _MASKS = {}

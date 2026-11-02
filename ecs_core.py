@@ -1,6 +1,6 @@
 """EX CREATOR STUDIO - lip sync engine (face/mouth detection, audio envelope, mouth rendering, MP4 export).
 (c)2026 EX Inc./HYPERION DIGITAL (c)2026"""
-import math, os, subprocess, sys, wave
+import hashlib, json, math, os, subprocess, sys, threading, time, wave
 import numpy as np
 import cv2
 
@@ -58,7 +58,7 @@ def _mouth_blob(small, face, kind):
     x, y, fw, fh = face
     H, W = small.shape[:2]
     rx0, rx1 = int(max(0, x + fw * 0.22)), int(min(W, x + fw * 0.78))
-    ry0, ry1 = int(max(0, y + fh * 0.50)), int(min(H, y + fh * 0.97))
+    ry0, ry1 = int(max(0, y + fh * (0.60 if kind == "anime" else 0.50))), int(min(H, y + fh * 0.97))
     if rx1 - rx0 < 8 or ry1 - ry0 < 8:
         return None
     reg = small[ry0:ry1, rx0:rx1].astype(np.float32)
@@ -82,25 +82,182 @@ def _mouth_blob(small, face, kind):
         if bw < bh * 1.2 or bw > rw * 0.95:
             continue
         ccx, ccy = cen[i]
-        cost = abs(ccx - rw / 2) / rw * 2 + abs(ccy - exp_y) / rh * 1.2 - min(1.0, area / (rw * rh * 0.05)) * 0.3
+        # a twin blob mirrored across the face centre at the same height = a pair of eyes, not a mouth
+        twin = False
+        for j in range(1, n):
+            if j != i and st[j][4] > area * 0.4 and st[j][4] < area * 2.5 and abs(cen[j][1] - ccy) < max(bh, 4) \
+                    and abs((cen[j][0] + ccx) / 2 - rw / 2) < rw * 0.08 and abs(cen[j][0] - ccx) > bw:
+                twin = True; break
+        if twin:
+            continue
+        cost = abs(ccx - rw / 2) / rw * 2.5 + abs(ccy - exp_y) / rh * 1.5 - min(1.0, area / (rw * rh * 0.05)) * 0.2
         if cost < bs:
-            best, bs = (rx0 + bx + bw / 2.0, ry0 + by + bh / 2.0, float(bw)), cost
+            best, bs = (rx0 + bx + bw / 2.0, ry0 + by + bh * (0.4 if kind == "anime" else 0.5), float(bw)), cost
     return best
 
 
-def detect_mouth(rgb):
-    """Return (kind, face_rect, mouth) where kind is 'face', 'anime' or None.
-    mouth = (cx, cy, mw, mh) in image pixels."""
+_YUNET = [None, False]
+
+
+def _yunet():
+    """OpenCV YuNet face detector (5 landmarks incl. both mouth corners). Loaded from memory so
+    non-ASCII install paths work."""
+    if not _YUNET[1]:
+        _YUNET[1] = True
+        try:
+            buf = np.fromfile(res_path("assets", "face_detection_yunet_2023mar.onnx"), np.uint8)
+            _YUNET[0] = cv2.FaceDetectorYN.create("onnx", buf, np.array([], np.uint8), (320, 320), 0.8, 0.3, 50)
+        except Exception:
+            _YUNET[0] = None
+    return _YUNET[0]
+
+
+def _pad(img, frac):
+    """Pad with the median border colour so faces cut off by the image edge can still be found."""
+    h, w = img.shape[:2]
+    p = int(max(h, w) * frac)
+    if p < 2:
+        return img, 0
+    edge = np.concatenate([img[0], img[-1], img[:, 0], img[:, -1]]).reshape(-1, img.shape[2] if img.ndim == 3 else 1)
+    col = [int(v) for v in np.median(edge, axis=0)]
+    return cv2.copyMakeBorder(img, p, p, p, p, cv2.BORDER_CONSTANT, value=col if img.ndim == 3 else col[0]), p
+
+
+def _detect_yunet(small):
+    det = _yunet()
+    if det is None:
+        return None
+    best = None
+    for frac in (0.0, 0.25):
+        img, p = _pad(small, frac)
+        h, w = img.shape[:2]
+        k = min(1.0, 640.0 / max(h, w))
+        q = cv2.resize(img, (max(1, int(w * k)), max(1, int(h * k))), interpolation=cv2.INTER_AREA) if k < 1 else img
+        try:
+            det.setInputSize((q.shape[1], q.shape[0]))
+            _, faces = det.detect(cv2.cvtColor(q, cv2.COLOR_RGB2BGR))
+        except Exception:
+            faces = None
+        if faces is None:
+            continue
+        for f in faces:
+            f = f.astype(np.float64)
+            v = f[:14] / k
+            v[0:13:2] -= p; v[1:14:2] -= p
+            fx, fy, fw, fh = v[:4]
+            if fw < 12 or fh < 12:
+                continue
+            sc = float(f[14]) * fw * fh
+            if best is None or sc > best[0]:
+                best = (sc, v)
+        if best is not None:
+            break
+    if best is None:
+        return None
+    v = best[1]
+    fx, fy, fw, fh = v[:4]
+    (lx, ly), (rx, ry) = v[10:12], v[12:14]
+    (ex1, ey1), (ex2, ey2) = v[4:6], v[6:8]
+    cx, cy = (lx + rx) / 2, (ly + ry) / 2
+    cw = math.hypot(rx - lx, ry - ly)
+    eye_d = math.hypot(ex2 - ex1, ey2 - ey1)
+    # sanity: corners must be a plausible mouth for this face, otherwise use face proportions
+    if not (eye_d * 0.45 < cw < eye_d * 1.6) or not (fy + fh * 0.45 < cy < fy + fh * 1.05):
+        cx, cy, cw = fx + fw / 2, fy + fh * 0.78, fw * 0.38
+    return (fx, fy, fw, fh), (cx, cy, cw * 1.08)
+
+
+def _fill_holes(m):
+    cs, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    out = np.zeros_like(m)
+    cv2.drawContours(out, cs, -1, 1, -1)
+    return out
+
+
+def drawn_face(rgb):
+    """Drawn faces (stickman, emoji, simple cartoons): two eye blobs side by side and the mouth mark under
+    them. Returns (face_rect, (cx, cy, mw, mh)) in rgb coords or None."""
+    h, w = rgb.shape[:2]
+    s = min(1.0, 600.0 / max(h, w))
+    sm = cv2.resize(rgb, (max(1, int(w * s)), max(1, int(h * s))), interpolation=cv2.INTER_AREA) if s < 1 else rgb
+    g = cv2.cvtColor(sm, cv2.COLOR_RGB2GRAY)
+    sh, sw = g.shape
+    A = float(sh * sw)
+    k = int(min(sh, sw) * 0.2) | 1
+    bg = cv2.medianBlur(g, max(5, min(k, 255)))
+    gf, bf = g.astype(np.float32), bg.astype(np.float32)
+    ink = (((bf - gf) > 40) | ((gf < 70) & (bf > 100))).astype(np.uint8)
+    ink = _fill_holes(ink)
+    n, lab, st, cen = cv2.connectedComponentsWithStats(ink, 8)
+    eyes = []
+    for i in range(1, n):
+        bx, by, bw, bh, ar = st[i]
+        if ar < A * 0.00012 or ar > A * 0.05 or not (0.3 < bw / float(bh) < 2.2) or ar / float(bw * bh) < 0.55:
+            continue
+        eyes.append((i, cen[i][0], cen[i][1], bw, bh, ar))
+    eyes = sorted(eyes, key=lambda e: -e[5])[:40]
+    best = None
+    for a in range(len(eyes)):
+        for b in range(a + 1, len(eyes)):
+            ea, eb = (eyes[a], eyes[b]) if eyes[a][1] < eyes[b][1] else (eyes[b], eyes[a])
+            dx = eb[1] - ea[1]; dy = abs(eb[2] - ea[2])
+            if dx < sw * 0.04 or dy > dx * 0.3 or max(ea[5], eb[5]) / float(min(ea[5], eb[5])) > 2.5:
+                continue
+            esz = (ea[3] + eb[3]) / 2.0
+            if dx < esz * 1.4 or dx > esz * 9:
+                continue
+            mx, my = (ea[1] + eb[1]) / 2, (ea[2] + eb[2]) / 2
+            mb, ms = None, 1e9
+            for i in range(1, n):
+                if i in (ea[0], eb[0]):
+                    continue
+                bx, by, bw, bh, ar = st[i]
+                if bw < dx * 0.2 or bw > dx * 3.0 or bh > dx * 1.4 or bw < bh * 0.9 or bx <= 0 or bx + bw >= sw:
+                    continue
+                ccx, ccy = bx + bw / 2.0, by + bh / 2.0
+                off = ccy - my
+                if off < dx * 0.35 or off > dx * 1.7 or abs(ccx - mx) > dx * 0.35:
+                    continue
+                c = abs(ccx - mx) / dx * 2 + abs(off - dx * 0.8) / dx + abs(bw - dx * 0.75) / dx * 0.25 - min(ar / (dx * dx * 0.3), 1.0) * 0.3
+                if c < ms:
+                    mb, ms = (ccx, ccy, float(bw), float(bh)), c
+            if mb is None:
+                continue  # a pair of dots with nothing under them is not trusted as a face
+            sc = ms + dy / dx
+            if best is None or sc < best[0]:
+                best = (sc, dx, mx, my, mb)
+    if best is None or best[0] > 1.6:
+        return None
+    _, dx, mx, my, (cx, cy, mw, mh) = best
+    inv = 1.0 / s
+    face = (int((mx - dx * 1.1) * inv), int((my - dx * 1.0) * inv), int(dx * 2.2 * inv), int(dx * 2.3 * inv))
+    return face, (cx * inv, cy * inv, max(mw, dx * 0.3) * inv, max(mh, dx * 0.12) * inv)
+
+
+def _detect_mouth(rgb):
+    """Return (kind, face_rect, mouth) where kind is 'face', 'anime', 'drawn' or None.
+    mouth = (cx, cy, mw, mh) in image pixels: centre of the lips (the line between them), lip width
+    (corner to corner) and lip height.
+    Order: YuNet landmarks (photos, 3D renders, painted faces) -> anime face cascade + mouth search
+    (anime/cartoon) -> drawn-face finder (stickman, emoji) -> classic face cascades."""
     h, w = rgb.shape[:2]
     s = min(1.0, 900.0 / max(h, w))
     small = cv2.resize(rgb, (max(1, int(w * s)), max(1, int(h * s))), interpolation=cv2.INTER_AREA) if s < 1 else rgb
+    small = np.ascontiguousarray(small)
     gray = cv2.cvtColor(small, cv2.COLOR_RGB2GRAY)
-    geq = cv2.equalizeHist(gray)
+    inv = 1.0 / s
+    y = _detect_yunet(small)
+    if y is not None:
+        (fx, fy, fw, fh), (cx, cy, mw) = y
+        cy = _lip_line(gray, cx, cy, mw, mw * 0.12)
+        face = tuple(int(v * inv) for v in (fx, fy, fw, fh))
+        return "face", face, (cx * inv, cy * inv, mw * inv, mw * 0.42 * inv)
+    pimg, p = _pad(small, 0.3)
+    geq = cv2.equalizeHist(cv2.cvtColor(pimg, cv2.COLOR_RGB2GRAY))
     md = min(gray.shape)
-    best = None
+    found = []
     for name, kind, kw in (("lbpcascade_animeface.xml", "anime", dict(scaleFactor=1.05, minNeighbors=5)),
-                           ("haarcascade_frontalface_default.xml", "face", dict(scaleFactor=1.1, minNeighbors=6)),
-                           ("haarcascade_frontalface_alt2.xml", "face", dict(scaleFactor=1.1, minNeighbors=5))):
+                           ("haarcascade_frontalface_alt2.xml", "face", dict(scaleFactor=1.1, minNeighbors=8))):
         c = _cascade(name)
         if c is None:
             continue
@@ -108,28 +265,107 @@ def detect_mouth(rgb):
             faces = c.detectMultiScale(geq, minSize=(max(24, int(md * 0.08)),) * 2, **kw)
         except Exception:
             faces = ()
-        for (x, y, fw, fh) in faces:
-            if best is None or fw * fh > best[1][2] * best[1][3] * 1.15:
-                best = (kind, (x, y, fw, fh))
-        if best is not None:
+        for (x, y_, fw, fh) in faces:
+            found.append((kind, (x - p, y_ - p, fw, fh)))
+        if found:
             break
-    if best is None:
-        return None, None, None
-    kind, (x, y, fw, fh) = best
-    if kind == "face":
-        cx, cy, mw = x + fw * 0.5, y + fh * 0.775, fw * 0.36
-    else:
-        cx, cy, mw = x + fw * 0.5, y + fh * 0.72, fw * 0.22
-    blob = _mouth_blob(small, (x, y, fw, fh), kind)
-    if blob is not None:
-        cx, cy = blob[0], blob[1]
-        mw = float(np.clip(blob[2] * 1.05, fw * (0.16 if kind == "anime" else 0.26), fw * 0.5))
-    else:
-        cy = _lip_line(gray, cx, cy, mw, fh * 0.07)
-    mh = mw * 0.32
-    inv = 1.0 / s
-    face = tuple(int(v * inv) for v in (x, y, fw, fh))
-    return kind, face, (cx * inv, cy * inv, mw * inv, mh * inv)
+    d = drawn_face(rgb)
+    if found:
+        kind, (x, y_, fw, fh) = max(found, key=lambda f: f[1][2] * f[1][3])
+        # a drawn face (eyes + mouth mark) inside the cascade's face box is the most precise answer
+        if d is not None:
+            dcx, dcy = d[1][0] * s, d[1][1] * s
+            if x <= dcx <= x + fw and y_ + fh * 0.4 <= dcy <= y_ + fh * 1.05:
+                return kind, tuple(int(v * inv) for v in (x, y_, fw, fh)), d[1]
+        if kind == "face":
+            cx, cy, mw = x + fw * 0.5, y_ + fh * 0.775, fw * 0.36
+        else:
+            cx, cy, mw = x + fw * 0.5, y_ + fh * 0.74, fw * 0.22
+        blob = _mouth_blob(small, (x, y_, fw, fh), kind)
+        if blob is not None:
+            cx, cy = blob[0], blob[1]
+            mw = float(np.clip(blob[2] * 1.05, fw * (0.12 if kind == "anime" else 0.26), fw * 0.5))
+        else:
+            cy = _lip_line(gray, cx, cy, mw, fh * 0.07)
+        return kind, tuple(int(v * inv) for v in (x, y_, fw, fh)), (cx * inv, cy * inv, mw * inv, mw * 0.36 * inv)
+    if d is not None:
+        return "drawn", d[0], d[1]
+    return None, None, None
+
+
+def detect_mouth(rgb):
+    """detect_mouth(rgb) -> (kind, face_rect, mouth). A mouth that would fall outside the picture
+    (face cut off by the frame) is not used."""
+    kind, face, m = _detect_mouth(rgb)
+    if m is not None:
+        h, w = rgb.shape[:2]
+        cx, cy, mw, mh = (float(v) for v in m)
+        if not (0 <= cx < w and 0 <= cy - mh * 0.3 and cy + mh * 0.3 < h) or mw < 4:
+            return None, None, None
+        m = (cx, cy, mw, mh)
+    return kind, face, m
+
+
+# ----------------------------------------------------------------------------- remembered mouth spots
+_MEM_LOCK = threading.Lock()
+
+
+def _mem_path():
+    base = os.environ.get("LOCALAPPDATA") or os.path.join(os.path.expanduser("~"), ".local", "share")
+    d = os.path.join(base, "EX CREATOR STUDIO")
+    os.makedirs(d, exist_ok=True)
+    return os.path.join(d, "mouth_spots.json")
+
+
+def image_key(rgb):
+    """Stable id of a picture (its pixels), so a corrected mouth spot comes back the next time it is opened."""
+    h = hashlib.sha1(("%dx%d:" % (rgb.shape[1], rgb.shape[0])).encode())
+    h.update(np.ascontiguousarray(rgb).tobytes())
+    return h.hexdigest()
+
+
+def _mem_load():
+    try:
+        with open(_mem_path(), "r", encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def recall_mouth(key):
+    """-> (found, mouth or None). mouth in image pixels; found with None = user chose 'no lip sync'."""
+    with _MEM_LOCK:
+        e = _mem_load().get(key)
+    if not isinstance(e, dict):
+        return False, None
+    m = e.get("m")
+    if m is None:
+        return True, None
+    try:
+        return True, tuple(float(v) for v in m[:4])
+    except Exception:
+        return False, None
+
+
+def remember_mouth(key, mouth, forget=False):
+    """Save the user's mouth spot for this picture (None = no lip sync); forget=True removes it."""
+    with _MEM_LOCK:
+        d = _mem_load()
+        if forget:
+            d.pop(key, None)
+        else:
+            d[key] = {"m": None if mouth is None else [round(float(v), 2) for v in mouth[:4]], "t": int(time.time())}
+        if len(d) > 400:  # keep the newest
+            for k in sorted(d, key=lambda k: d[k].get("t", 0) if isinstance(d[k], dict) else 0)[:len(d) - 400]:
+                d.pop(k, None)
+        try:
+            tmp = _mem_path() + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(d, f)
+            os.replace(tmp, _mem_path())
+        except Exception:
+            pass
 
 
 # ----------------------------------------------------------------------------- audio

@@ -5,7 +5,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
 APP = "EX CREATOR STUDIO"
-APP_VERSION = "1.5.0"
+APP_VERSION = "1.5.1"
 COPYRIGHT = "\u00a92026 EX Inc./HYPERION DIGITAL \u00a92026"
 REPO = "Teobokki/ex-creator-studio"
 UPDATE_URL = "https://raw.githubusercontent.com/%s/main/latest.json" % REPO
@@ -163,6 +163,7 @@ class Studio(tk.Tk):
         self.wav = None; self.wav_key = None; self.track = None
         self.playing = False; self.t0 = 0.0; self.busy = False
         self.set_mode = False; self.drag0 = None; self.marker_until = 0.0
+        self.img_key = None; self.mdrag = None; self.hover = False
         self.shots = []; self.sel = None; self.sdrag = None
         self.photo = None; self.disp = None; self.disp_s = 1.0; self.disp_off = (0, 0); self._resize_job = None
         self.voices = []
@@ -263,6 +264,8 @@ class Studio(tk.Tk):
         self.cv.bind("<B1-Motion>", self._drag)
         self.cv.bind("<ButtonRelease-1>", self._release)
         self.cv.bind("<Button-3>", self._right)
+        self.cv.bind("<Motion>", self._motion)
+        self.cv.bind("<Leave>", lambda e: self._set_hover(False))
         self.bind_all("<MouseWheel>", self._wheel_any)
         self.cv.bind("<Button-4>", lambda e: self._wheel(e, 120))
         self.cv.bind("<Button-5>", lambda e: self._wheel(e, -120))
@@ -344,7 +347,7 @@ class Studio(tk.Tk):
             self.chip.configure(text="", bg=BG)
         elif self.mouth is not None:
             label = {"face": "Character detected (face)", "anime": "Character detected (anime/cartoon)",
-                     "manual": "Character (mouth set by you)"}.get(self.kind, "Character")
+                     "drawn": "Character detected (drawn face)", "manual": "Character (mouth set by you)"}.get(self.kind, "Character")
             self.chip.configure(text="  \u25cf " + label + " \u00b7 lip sync ON  ", fg=GREEN, bg=CARD)
         else:
             self.chip.configure(text="  \u25cf Art \u00b7 no lip sync (use Set mouth to make it talk)  ", fg=AMBER, bg=CARD)
@@ -409,15 +412,55 @@ class Studio(tk.Tk):
         s = self.disp_s
         return (self.mouth[0] * s, self.mouth[1] * s, self.mouth[2] * s, self.mouth[3] * s)
 
-    def _draw_marker(self):
-        self.cv.delete("marker")
-        if self.mouth is None or self.disp is None or not (self.set_mode or time.time() < self.marker_until):
-            return
+    def _marker_box(self):
+        """Mouth spot on the canvas: (x0, y0, x1, y1) of the lips ellipse (at least a few px so it can be grabbed)."""
         cx, cy, mw, mh = self._disp_mouth()
         ox, oy = self.disp_off
-        self.cv.create_oval(ox + cx - mw / 2, oy + cy - mh / 2, ox + cx + mw / 2, oy + cy + mh / 2,
-                            outline=RED, width=2, dash=(4, 3), tags="marker")
-        self.cv.create_text(ox + cx, oy + cy - mh / 2 - 10, text="mouth", fill=RED, font=(FONT, 8, "bold"), tags="marker")
+        hw, hh = max(5.0, mw / 2), max(3.0, mh / 2)
+        return ox + cx - hw, oy + cy - hh, ox + cx + hw, oy + cy + hh
+
+    def _draw_marker(self):
+        self.cv.delete("marker")
+        if self.mouth is None or self.disp is None or self.playing:
+            return
+        if not (self.set_mode or self.hover or self.mdrag or time.time() < self.marker_until):
+            return
+        x0, y0, x1, y1 = self._marker_box()
+        self.cv.create_oval(x0, y0, x1, y1, outline=RED, width=1, dash=(3, 2), tags="marker")
+        self.cv.create_rectangle(x1 - 3, y1 - 3, x1 + 3, y1 + 3, fill=RED, outline="white", width=1, tags="marker")
+        if self.set_mode or self.mdrag:
+            self.cv.create_text((x0 + x1) / 2, y0 - 9, text="mouth", fill=RED, font=(FONT, 8, "bold"), tags="marker")
+
+    def _mouth_hit(self, ex, ey):
+        """'resize' on the small corner handle, 'move' inside the lips ellipse, else None."""
+        if self.mouth is None or self.disp is None or self.playing:
+            return None
+        x0, y0, x1, y1 = self._marker_box()
+        if abs(ex - x1) <= 7 and abs(ey - y1) <= 7:
+            return "resize"
+        cx, cy, rx, ry = (x0 + x1) / 2, (y0 + y1) / 2, (x1 - x0) / 2 + 4, (y1 - y0) / 2 + 4
+        if ((ex - cx) / rx) ** 2 + ((ey - cy) / ry) ** 2 <= 1.0:
+            return "move"
+        return None
+
+    def _set_hover(self, on):
+        if on != self.hover:
+            self.hover = on
+            self._draw_marker()
+
+    def _motion(self, e):
+        if self.disp is None:
+            return
+        ox, oy = self.disp_off
+        dh, dw = self.disp.shape[:2]
+        self._set_hover(ox <= e.x <= ox + dw and oy <= e.y <= oy + dh)
+        if not self.set_mode and not self.mdrag:
+            hit = self._mouth_hit(e.x, e.y)
+            self.cv.configure(cursor={"resize": "sizing", "move": "fleur"}.get(hit, "arrow"))
+
+    def _save_mouth(self):
+        if self.img_key:
+            core.remember_mouth(self.img_key, self.mouth)
 
     def _show_frame(self, op, wf=1.0):
         if self.disp is None or self.photo is None:
@@ -445,6 +488,16 @@ class Studio(tk.Tk):
         self.src_name = os.path.basename(path)
         self._invalidate_audio(keep_text=True)
         self.set_mouth_mode(False)
+        self.img_key = core.image_key(rgb)
+        found, m = core.recall_mouth(self.img_key)
+        if found:
+            self.mouth, self.kind, self.face = m, ("manual" if m is not None else None), None
+            self.marker_until = time.time() + 2.5
+            self._fit(); self._update_chip()
+            self.after(2600, self._draw_marker)
+            self.set_status("%s loaded \u2014 using the mouth spot you set last time%s." % (
+                self.src_name, "" if m is not None else " (no lip sync)"), GREEN if m is not None else AMBER)
+            return
         self.auto_detect(quiet=True)
 
     def auto_detect(self, quiet=False):
@@ -452,11 +505,14 @@ class Studio(tk.Tk):
             return
         kind, face, mouth = core.detect_mouth(self.src)
         self.kind, self.face, self.mouth = kind, face, mouth
+        if not quiet and self.img_key:
+            core.remember_mouth(self.img_key, None, forget=True)  # back to automatic for this picture
         self.marker_until = time.time() + 2.5
         self._fit(); self._update_chip()
         self.after(2600, self._draw_marker)
         if mouth is not None:
-            self.set_status("%s loaded \u2014 character detected, lip sync is ready. Type below and press Speak." % self.src_name, GREEN)
+            self.set_status("%s loaded \u2014 character detected, lip sync is ready. Not quite on the lips? Drag the red mouth spot "
+                            "(corner = resize)." % self.src_name, GREEN)
         else:
             self.set_status("%s loaded \u2014 no face found, shown as art. Use \u25ce Set mouth to make any character talk." % self.src_name, AMBER)
 
@@ -483,6 +539,12 @@ class Studio(tk.Tk):
             self.upload(); return
         if not self.set_mode:
             self.cv.focus_set()
+            hit = self._mouth_hit(e.x, e.y)
+            if hit:
+                ix, iy = self._to_img(e)
+                self.mdrag = (hit, ix - self.mouth[0], iy - self.mouth[1], self.mouth)
+                self.sel = None; self._show_frame(0); self._draw_marker()
+                return
             i, mode = self._hit(e.x, e.y)
             self.sel = i
             if i is not None:
@@ -496,6 +558,18 @@ class Studio(tk.Tk):
         self.drag0 = (e.x, e.y)
 
     def _drag(self, e):
+        if self.mdrag:
+            mode, dx, dy, m0 = self.mdrag
+            ix, iy = self._to_img(e)
+            h, w = self.src.shape[:2]
+            cx, cy, mw, mh = self.mouth
+            if mode == "move":
+                cx, cy = float(np.clip(ix - dx, 0, w - 1)), float(np.clip(iy - dy, 0, h - 1))
+            else:
+                mw = float(np.clip(abs(ix - cx) * 2, 6, w)); mh = float(np.clip(abs(iy - cy) * 2, 3, h))
+            self.mouth = (cx, cy, mw, mh)
+            self._draw_marker()
+            return
         if not self.set_mode and self.sdrag and self.sel is not None:
             sh = self.shots[self.sel]; ix, iy = self._to_img(e)
             h, w = self.src.shape[:2]
@@ -513,6 +587,15 @@ class Studio(tk.Tk):
         self.cv.create_oval(x0, y0, e.x, e.y, outline=RED, width=2, tags="drag")
 
     def _release(self, e):
+        if self.mdrag:
+            moved = self.mouth != self.mdrag[3]
+            self.mdrag = None
+            if moved:
+                self.kind = "manual"; self._save_mouth(); self._update_chip()
+                self.set_status("Mouth spot saved for this picture \u2014 it will be used next time too. \u263a Auto-detect resets it.", GREEN)
+                self._preview_wiggle()
+            self._draw_marker()
+            return
         if self.sdrag:
             self.sdrag = None; return
         if not self.set_mode or not self.drag0:
@@ -531,6 +614,7 @@ class Studio(tk.Tk):
         if not (0 <= cx < w and 0 <= cy < h):
             return
         self.mouth = (cx, cy, mw, mh); self.kind = "manual"
+        self._save_mouth()
         self._update_chip(); self._draw_marker()
         self.set_status("Mouth set \u2014 lip sync ON. Click again to adjust, Esc when done.", GREEN)
         self._preview_wiggle()
@@ -550,6 +634,7 @@ class Studio(tk.Tk):
             return
         if self.set_mode and self.src is not None:
             self.mouth = None; self.kind = None
+            self._save_mouth()
             self._update_chip(); self._draw_marker(); self._fit()
             self.set_status("Mouth removed \u2014 this image is treated as art (no lip sync).", AMBER)
 
@@ -711,6 +796,7 @@ class Studio(tk.Tk):
         self.player.play(self.wav)
         self.playing = True
         self.t0 = time.perf_counter()
+        self._draw_marker()
         lip = self.mouth is not None and self.disp is not None
         self.set_status("Speaking\u2026" + (" (lip sync)" if lip else " (art \u2014 no lip sync)"), GREEN)
         self._tick()
@@ -722,7 +808,7 @@ class Studio(tk.Tk):
         i = int((time.perf_counter() - self.t0) * core.FPS)
         if i >= len(op) + 3:
             self.playing = False
-            self._show_frame(0)
+            self._show_frame(0); self._draw_marker()
             self.set_status("Done. Press \u2b07 Download to save the lip sync video.", MUT)
             return
         if self.mouth is not None:
@@ -741,7 +827,7 @@ class Studio(tk.Tk):
         self.stop()
         self.set_mouth_mode(False)
         self._invalidate_audio(keep_text=False)
-        self.src = None; self.kind = None; self.mouth = None; self.face = None; self.src_name = ""
+        self.src = None; self.kind = None; self.mouth = None; self.face = None; self.src_name = ""; self.img_key = None; self.mdrag = None
         self.shots = []; self.sel = None; self.sdrag = None
         self._fit(); self._update_chip()
         self.set_status("Board cleared.", MUT)

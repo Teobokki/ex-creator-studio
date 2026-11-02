@@ -1971,7 +1971,7 @@ class ArtPanel(tk.Frame):
     def send_studio(self):
         self.cancel_modes(); p = self._flat_tmp(); self.app.show_tab("studio"); s = self.app.studio
         try:
-            s.src_rgb = self.ui.open_image_rgb(p); s.char_name = "EX ART"; s.auto_detect()
+            s.src_rgb = self.ui.open_image_rgb(p); s.char_name = "EX ART"; s.load_char()
         except Exception as e:
             messagebox.showerror(self.ui.APP, "Couldn't send to EX STUDIO:\n%s" % e, parent=self)
 

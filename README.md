@@ -10,12 +10,20 @@ The **REX BOARD** shows one character or piece of art. It is the screen the app 
 
 ## Features
 - **Upload** a character or any art (png, jpg, jpeg, webp, gif, bmp). The picker opens in your Downloads folder. The board stays empty until you upload something.
-- **Auto character detection.** OpenCV finds anime/cartoon faces (lbpcascade_animeface) and real faces (Haar frontal face). It then locates the mouth inside the face. If no face is found, the image is shown as art with no lip sync.
+- **Auto character detection.** A face landmark model (OpenCV YuNet) finds the two mouth corners on photos, 3D renders and painted faces. Anime/cartoon faces use an anime face detector plus a mouth search, and drawn faces (stickmen, emoji, simple cartoons) are found from their eyes and mouth line. If no face is found, the image is shown as art with no lip sync.
+- **Move the mouth spot.** Hover the picture to see the small red mouth spot. Drag it to move it and drag its corner to resize it to the lips. The spot is remembered for that picture, on the board and in EX STUDIO. **Auto-detect** goes back to automatic.
 - **Set mouth.** Click the mouth, or drag a box around it, so any character can talk. Right-click marks the image as art, and Esc finishes.
 - **Speak.** Offline SAPI5 text-to-speech uses your installed Windows voices, with a speed setting. The voice plays while the mouth moves in sync.
 - **Bin.** Clears the board: image, text, and the generated audio and video.
 - **Download.** Renders the lip-sync animation and the voice into an H.264/AAC MP4. It saves to `Downloads\EX CREATOR STUDIO <date time>.mp4`.
 - **Check for updates.** Reads `latest.json` from this repo and installs newer versions.
+
+## New in 1.5.1
+### Lip sync lands on the lips
+- The mouth is now found from the real mouth corners of the face (YuNet landmarks) on photos and 3D or painted characters, so the animated mouth sits on the lips and is as wide as them.
+- Anime/cartoon faces no longer pick an eye as the mouth, and drawn faces (stickmen, emoji, simple cartoons) now get lip sync automatically.
+- A face cut off by the picture edge no longer puts the mouth outside the picture.
+- Drag the small red mouth spot to correct it, and drag its corner to resize it. The spot is remembered for that picture on REX BOARD and in EX STUDIO, and the downloaded video uses it.
 
 ## New in 1.5.0
 ### REX ANIMATE - frame-by-frame 2D animation

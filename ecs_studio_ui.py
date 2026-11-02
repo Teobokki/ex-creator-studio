@@ -55,6 +55,7 @@ class StudioPanel(tk.Frame):
         self.rec_path = None; self.rec_info = None; self.cap = None; self.cap_t = -1.0
         self.frame = None; self.pos = 0.0; self.dur = 0.0
         self.sq = None; self.mouth = None; self.kind = None; self.char_name = ""
+        self.crop = None; self.img_key = None; self.mdrag = None; self.hover = False
         self.lines = []; self.speak_line = None
         self.playing = False; self.p_t0 = 0.0; self.p_pos0 = 0.0; self.p_prev = 0.0
         self.recording = False
@@ -154,6 +155,8 @@ class StudioPanel(tk.Frame):
         self.cv.bind("<B1-Motion>", self._drag)
         self.cv.bind("<ButtonRelease-1>", self._release)
         self.cv.bind("<Button-3>", self._right)
+        self.cv.bind("<Motion>", self._motion)
+        self.cv.bind("<Leave>", lambda e: self._set_hover(False))
         self._update_chip(); self._update_controls()
 
     def set_status(self, t, color=None):
@@ -177,7 +180,7 @@ class StudioPanel(tk.Frame):
         if self.sq is None:
             self.chip.configure(text="  No character yet \u2014 choose an image from Downloads  ", fg=ui.MUT, bg=ui.BG)
         elif self.mouth is not None:
-            lab = {"face": "face detected", "anime": "anime/cartoon detected", "manual": "mouth set by you"}.get(self.kind, "")
+            lab = {"face": "face detected", "anime": "anime/cartoon detected", "drawn": "drawn face detected", "manual": "mouth set by you"}.get(self.kind, "")
             self.chip.configure(text="  \u25cf %s \u00b7 %s \u00b7 lip sync ON  " % (self.char_name, lab), fg=ui.GREEN, bg=ui.CARD)
         else:
             self.chip.configure(text="  \u25cf %s \u00b7 art \u00b7 no lip sync (use Set mouth)  " % self.char_name, fg=ui.AMBER, bg=ui.CARD)
@@ -393,11 +396,10 @@ class StudioPanel(tk.Frame):
             cv.create_rectangle(ox + x, oy + y, ox + x + S, oy + y + S, outline=self.ui.RED, dash=(5, 4), width=2, tags="ui")
             cv.create_text(ox + x + S / 2, oy + y + S / 2, text="Character\nsquare\n(click to choose)", fill=self.ui.MUT,
                            font=(F, 8, "bold"), justify="center", tags="ui")
-        elif self.mouth is not None and (self.set_mode or time.time() < self.marker_until):
-            x, y, S = st.overlay_geom(dw, dh); k = S / float(st.SQ)
-            cx, cy, mw, mh = [v * k for v in self.mouth]
-            cv.create_oval(ox + x + cx - mw / 2, oy + y + cy - mh / 2, ox + x + cx + mw / 2, oy + y + cy + mh / 2,
-                           outline=self.ui.RED, width=2, dash=(4, 3), tags="ui")
+        elif self.mouth is not None and not self.playing and (self.set_mode or self.hover or self.mdrag or time.time() < self.marker_until):
+            x0, y0, x1, y1 = self._marker_box()
+            cv.create_oval(x0, y0, x1, y1, outline=self.ui.RED, width=1, dash=(3, 2), tags="ui")
+            cv.create_rectangle(x1 - 3, y1 - 3, x1 + 3, y1 + 3, fill=self.ui.RED, outline="white", width=1, tags="ui")
         if self.set_mode and self.sq is not None:
             x, y, S = st.overlay_geom(dw, dh)
             cv.create_rectangle(ox + x - 3, oy + y - 3, ox + x + S + 3, oy + y + S + 3, outline=self.ui.GREEN, width=2, tags="ui")
@@ -451,17 +453,33 @@ class StudioPanel(tk.Frame):
         except Exception as e:
             messagebox.showerror(self.ui.APP, "Couldn't open that image:\n%s" % e, parent=self.app); return
         self.src_rgb = rgb; self.char_name = os.path.basename(p)
-        self.auto_detect()
+        self.load_char()
 
-    def auto_detect(self):
+    def load_char(self):
+        """New character: use the mouth spot saved for this picture if there is one, else detect it."""
         if getattr(self, "src_rgb", None) is None:
             return
-        self.sq, self.kind, self.mouth = st.make_square(self.src_rgb)
+        self.img_key = core.image_key(self.src_rgb)
+        found, m = core.recall_mouth(self.img_key)
+        if not found:
+            self.auto_detect(forget=False); return
+        self.sq, self.kind, self.mouth, self.crop = st.make_square_ex(self.src_rgb, m, manual=True)
+        self.marker_until = time.time() + 2.5
+        self.after(2600, self.render)
+        self._update_chip(); self.render()
+        self.set_status("Character ready \u2014 using the mouth spot you set last time.", self.ui.GREEN)
+
+    def auto_detect(self, forget=True):
+        if getattr(self, "src_rgb", None) is None:
+            return
+        if forget and self.img_key:
+            core.remember_mouth(self.img_key, None, forget=True)
+        self.sq, self.kind, self.mouth, self.crop = st.make_square_ex(self.src_rgb)
         self.marker_until = time.time() + 2.5
         self.after(2600, self.render)
         self._update_chip(); self.render()
         if self.mouth is not None:
-            self.set_status("Character ready \u2014 lip sync ON.", self.ui.GREEN)
+            self.set_status("Character ready \u2014 lip sync ON. Not on the lips? Drag the red mouth spot in the square (corner = resize).", self.ui.GREEN)
         else:
             self.set_status("No face found \u2014 shown as art. Use \u25ce Set mouth and click the mouth in the square.", self.ui.AMBER)
 
@@ -494,7 +512,51 @@ class StudioPanel(tk.Frame):
         x, y, S = r
         return (ex - x) / S * st.SQ, (ey - y) / S * st.SQ
 
+    def _marker_box(self):
+        x, y, S = self._sq_rect(); k = S / float(st.SQ)
+        cx, cy, mw, mh = [v * k for v in self.mouth]
+        hw, hh = max(4.0, mw / 2), max(3.0, mh / 2)
+        return x + cx - hw, y + cy - hh, x + cx + hw, y + cy + hh
+
+    def _mouth_hit(self, ex, ey):
+        if self.mouth is None or self.sq is None or self.playing or not self.disp_geom:
+            return None
+        x0, y0, x1, y1 = self._marker_box()
+        if abs(ex - x1) <= 6 and abs(ey - y1) <= 6:
+            return "resize"
+        cx, cy, rx, ry = (x0 + x1) / 2, (y0 + y1) / 2, (x1 - x0) / 2 + 3, (y1 - y0) / 2 + 3
+        return "move" if ((ex - cx) / rx) ** 2 + ((ey - cy) / ry) ** 2 <= 1.0 else None
+
+    def _set_hover(self, on):
+        if on != self.hover:
+            self.hover = on
+            if not self.playing:
+                self.render()
+
+    def _motion(self, e):
+        r = self._sq_rect()
+        if not r or self.sq is None:
+            return
+        self._set_hover(r[0] <= e.x <= r[0] + r[2] and r[1] <= e.y <= r[1] + r[2])
+        if not self.set_mode and not self.mdrag:
+            hit = self._mouth_hit(e.x, e.y)
+            self.cv.configure(cursor={"resize": "sizing", "move": "fleur"}.get(hit, "arrow"))
+
+    def _save_mouth(self):
+        """Remember the spot in picture pixels so it comes back for this image (board and studio)."""
+        if not self.img_key or self.crop is None:
+            return
+        x0, y0, s = self.crop
+        m = None if self.mouth is None else (self.mouth[0] / s + x0, self.mouth[1] / s + y0, self.mouth[2] / s, self.mouth[3] / s)
+        core.remember_mouth(self.img_key, m)
+
     def _press(self, e):
+        if not self.set_mode:
+            hit = self._mouth_hit(e.x, e.y)
+            if hit:
+                sx, sy = self._to_sq(e.x, e.y)
+                self.mdrag = (hit, sx - self.mouth[0], sy - self.mouth[1], self.mouth)
+                return
         r = self._sq_rect()
         inside = r and r[0] <= e.x <= r[0] + r[2] and r[1] <= e.y <= r[1] + r[2]
         if self.sq is None and inside:
@@ -503,11 +565,32 @@ class StudioPanel(tk.Frame):
             self.drag0 = (e.x, e.y)
 
     def _drag(self, e):
+        if self.mdrag:
+            mode, dx, dy, m0 = self.mdrag
+            sx, sy = self._to_sq(e.x, e.y)
+            cx, cy, mw, mh = self.mouth
+            if mode == "move":
+                cx, cy = float(np.clip(sx - dx, 0, st.SQ - 1)), float(np.clip(sy - dy, 0, st.SQ - 1))
+            else:
+                mw = float(np.clip(abs(sx - cx) * 2, 6, st.SQ)); mh = float(np.clip(abs(sy - cy) * 2, 3, st.SQ))
+            self.mouth = (cx, cy, mw, mh)
+            self.render()
+            return
         if self.set_mode and self.drag0:
             self.cv.delete("drag")
             self.cv.create_oval(self.drag0[0], self.drag0[1], e.x, e.y, outline=self.ui.RED, width=2, tags="drag")
 
     def _release(self, e):
+        if self.mdrag:
+            moved = self.mouth != self.mdrag[3]
+            self.mdrag = None
+            if moved:
+                self.kind = "manual"; self._save_mouth(); self._update_chip()
+                self.set_status("Mouth spot saved for this picture. \u263a Auto-detect resets it.", self.ui.GREEN)
+                self._wiggle()
+            else:
+                self.render()
+            return
         if not (self.set_mode and self.drag0):
             return
         self.cv.delete("drag")
@@ -522,6 +605,7 @@ class StudioPanel(tk.Frame):
         if not (0 <= cx < st.SQ and 0 <= cy < st.SQ):
             return
         self.mouth, self.kind = (cx, cy, mw, mh), "manual"
+        self._save_mouth()
         self._update_chip()
         self.set_status("Mouth set \u2014 lip sync ON. Esc when done.", self.ui.GREEN)
         self._wiggle()
@@ -529,6 +613,7 @@ class StudioPanel(tk.Frame):
     def _right(self, e):
         if self.set_mode and self.sq is not None:
             self.mouth, self.kind = None, None
+            self._save_mouth()
             self._update_chip(); self.render()
             self.set_status("Mouth removed \u2014 the square is shown as art (no lip sync).", self.ui.AMBER)
 
@@ -649,6 +734,7 @@ class StudioPanel(tk.Frame):
             except Exception: pass
         self.rec_path = self.rec_info = self.frame = None; self.dur = 0.0; self.pos = 0.0
         self.sq = self.mouth = self.kind = None; self.src_rgb = None; self.char_name = ""
+        self.crop = None; self.img_key = None; self.mdrag = None
         self.lines = []; self.speak_line = None
         self.text.delete("1.0", "end")
         self._refresh_lines(); self._update_chip(); self.seek(0); self.render()
