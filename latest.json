@@ -1,12 +1,12 @@
 {
-  "version": "1.5.1",
-  "url": "https://github.com/Teobokki/ex-creator-studio/releases/download/v1.5.1/EX.CREATOR.STUDIO.Setup.1.5.1.exe",
-  "installer_url": "https://github.com/Teobokki/ex-creator-studio/releases/download/v1.5.1/EX.CREATOR.STUDIO.Setup.1.5.1.exe",
-  "full_url": "https://github.com/Teobokki/ex-creator-studio/releases/download/v1.5.1/EX.CREATOR.STUDIO.zip",
-  "portable_url": "https://github.com/Teobokki/ex-creator-studio/releases/download/v1.5.1/EX.CREATOR.STUDIO.zip",
-  "release_url": "https://github.com/Teobokki/ex-creator-studio/releases/tag/v1.5.1",
-  "sha256": "2583541cb3c0a1602460d6e624509e8b7098e45aadd7960e5d8e4bfa1b6c4d90",
-  "zip_sha256": "8a61cfe5a127731faadab59ad296e21f78acce0d5eb3abedfd871fab26686688",
+  "version": "1.5.2",
+  "url": "https://github.com/Teobokki/ex-creator-studio/releases/download/v1.5.2/EX.CREATOR.STUDIO.Setup.1.5.2.exe",
+  "installer_url": "https://github.com/Teobokki/ex-creator-studio/releases/download/v1.5.2/EX.CREATOR.STUDIO.Setup.1.5.2.exe",
+  "full_url": "https://github.com/Teobokki/ex-creator-studio/releases/download/v1.5.2/EX.CREATOR.STUDIO.zip",
+  "portable_url": "https://github.com/Teobokki/ex-creator-studio/releases/download/v1.5.2/EX.CREATOR.STUDIO.zip",
+  "release_url": "https://github.com/Teobokki/ex-creator-studio/releases/tag/v1.5.2",
+  "sha256": "45e9608911d3920ec4a20f1b075132bc3f6edb210392e076d1cc40ea76dec2c3",
+  "zip_sha256": "f16be9a2a59cf8653a184dd10c68642c20e46913305f06b0edc514d8cf9bd7fc",
   "released": "2026-11-02",
-  "notes": "Lip sync fix: the animated mouth now sits on the character's lips (mouth-corner face landmarks for photos/3D/painted faces, better anime mouth finding, automatic lip sync for stickmen/emoji/drawn faces). Drag the small red mouth spot to move or resize it; it is remembered per picture on REX BOARD and EX STUDIO and used in the downloaded video."
+  "notes": "Lip sync stays on the lips: the mouth opens around the lip line instead of sliding onto the chin, small and head-down faces are measured more precisely, and the mouth turns with tilted heads (photos, anime, cartoons and stickmen)."
 }
