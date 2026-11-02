@@ -123,48 +123,152 @@ def _pad(img, frac):
     return cv2.copyMakeBorder(img, p, p, p, p, cv2.BORDER_CONSTANT, value=col if img.ndim == 3 else col[0]), p
 
 
-def _detect_yunet(small):
+def _yunet_faces(img):
+    """All YuNet faces in an RGB image as 14-float landmark rows (box, eyes, nose, mouth corners) + score."""
     det = _yunet()
     if det is None:
-        return None
+        return []
+    h, w = img.shape[:2]
+    k = min(1.0, 640.0 / max(h, w))
+    q = cv2.resize(img, (max(1, int(w * k)), max(1, int(h * k))), interpolation=cv2.INTER_AREA) if k < 1 else img
+    try:
+        det.setInputSize((q.shape[1], q.shape[0]))
+        _, faces = det.detect(cv2.cvtColor(np.ascontiguousarray(q), cv2.COLOR_RGB2BGR))
+    except Exception:
+        faces = None
+    out = []
+    for f in faces if faces is not None else []:
+        f = f.astype(np.float64)
+        v = f[:14] / k
+        out.append((v, float(f[14])))
+    return out
+
+
+def _roll(v):
+    """Head roll (degrees, clockwise on screen = positive) from the eye line, steadied by the mouth corners."""
+    (ex1, ey1), (ex2, ey2), (lx, ly), (rx, ry) = v[4:6], v[6:8], v[10:12], v[12:14]
+    if ex1 > ex2:
+        ex1, ey1, ex2, ey2 = ex2, ey2, ex1, ey1
+    if lx > rx:
+        lx, ly, rx, ry = rx, ry, lx, ly
+    a_eye = math.degrees(math.atan2(ey2 - ey1, ex2 - ex1))
+    a_mouth = math.degrees(math.atan2(ry - ly, rx - lx))
+    return a_eye if abs(a_eye - a_mouth) > 20 else (a_eye * 0.6 + a_mouth * 0.4)
+
+
+def _detect_yunet(small):
+    """Best face -> (face_rect, mouth centre, corner width, head roll angle in degrees)."""
     best = None
     for frac in (0.0, 0.25):
         img, p = _pad(small, frac)
-        h, w = img.shape[:2]
-        k = min(1.0, 640.0 / max(h, w))
-        q = cv2.resize(img, (max(1, int(w * k)), max(1, int(h * k))), interpolation=cv2.INTER_AREA) if k < 1 else img
-        try:
-            det.setInputSize((q.shape[1], q.shape[0]))
-            _, faces = det.detect(cv2.cvtColor(q, cv2.COLOR_RGB2BGR))
-        except Exception:
-            faces = None
-        if faces is None:
-            continue
-        for f in faces:
-            f = f.astype(np.float64)
-            v = f[:14] / k
-            v[0:13:2] -= p; v[1:14:2] -= p
-            fx, fy, fw, fh = v[:4]
-            if fw < 12 or fh < 12:
+        for v, sc in _yunet_faces(img):
+            v = v.copy(); v[0:13:2] -= p; v[1:14:2] -= p
+            if v[2] < 12 or v[3] < 12:
                 continue
-            sc = float(f[14]) * fw * fh
-            if best is None or sc > best[0]:
-                best = (sc, v)
+            if best is None or sc * v[2] * v[3] > best[0]:
+                best = (sc * v[2] * v[3], v)
         if best is not None:
             break
     if best is None:
         return None
     v = best[1]
+    # refine: straighten the head and enlarge/shrink the face to ~200 px, then run the landmarks again.
+    # Tilted and small faces get much more accurate eyes and mouth corners this way.
+    for _ in range(2):
+        fx, fy, fw, fh = v[:4]
+        fcx, fcy = fx + fw / 2.0, fy + fh / 2.0
+        ang0 = _roll(v)
+        up = float(np.clip(200.0 / max(fw, fh, 1.0), 0.25, 8.0))
+        S = int(max(fw, fh) * 3.0 * up)
+        M = cv2.getRotationMatrix2D((fcx, fcy), ang0, up)
+        M[0, 2] += S / 2.0 - fcx; M[1, 2] += S / 2.0 - fcy
+        patch = cv2.warpAffine(small, M, (S, S), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+        Mi = cv2.invertAffineTransform(M)
+        cands = []
+        for v2, sc in _yunet_faces(patch):
+            c = (v2[0] + v2[2] / 2 - S / 2.0, v2[1] + v2[3] / 2 - S / 2.0)
+            if math.hypot(*c) < S * 0.2:
+                cands.append((math.hypot(*c), v2))
+        if not cands:
+            break
+        v2 = min(cands, key=lambda c: c[0])[1].copy()
+        pts = np.stack([v2[4:14:2], v2[5:14:2], np.ones(5)], 1) @ Mi.T  # landmarks back to picture coords
+        nv = v.copy()
+        nv[4:14:2], nv[5:14:2] = pts[:, 0], pts[:, 1]
+        cen = Mi @ np.array([v2[0] + v2[2] / 2, v2[1] + v2[3] / 2, 1.0])
+        nv[2], nv[3] = v2[2] / up, v2[3] / up
+        nv[0], nv[1] = cen[0] - nv[2] / 2, cen[1] - nv[3] / 2
+        # only trust the second look if it agrees with the first (same mouth, similar size)
+        def mouth_of(q):
+            return (q[10] + q[12]) / 2, (q[11] + q[13]) / 2, math.hypot(q[12] - q[10], q[13] - q[11])
+        (ax_, ay_, aw), (bx_, by_, bw) = mouth_of(v), mouth_of(nv)
+        if math.hypot(bx_ - ax_, by_ - ay_) > max(aw, fw * 0.25) * 0.45 or not (0.7 < bw / max(aw, 1e-3) < 1.45):
+            break
+        v = nv
+        if abs(_roll(v) - ang0) < 3:
+            break
     fx, fy, fw, fh = v[:4]
     (lx, ly), (rx, ry) = v[10:12], v[12:14]
     (ex1, ey1), (ex2, ey2) = v[4:6], v[6:8]
+    if ex1 > ex2:
+        ex1, ey1, ex2, ey2 = ex2, ey2, ex1, ey1
+    if lx > rx:
+        lx, ly, rx, ry = rx, ry, lx, ly
     cx, cy = (lx + rx) / 2, (ly + ry) / 2
     cw = math.hypot(rx - lx, ry - ly)
     eye_d = math.hypot(ex2 - ex1, ey2 - ey1)
+    ang = _roll(v)
     # sanity: corners must be a plausible mouth for this face, otherwise use face proportions
-    if not (eye_d * 0.45 < cw < eye_d * 1.6) or not (fy + fh * 0.45 < cy < fy + fh * 1.05):
+    r = math.radians(ang)
+    rel = ((cx - (fx + fw / 2)) * -math.sin(r) + (cy - (fy + fh / 2)) * math.cos(r)) / max(fh, 1) + 0.5
+    if not (eye_d * 0.45 < cw < eye_d * 1.6) or not (0.4 < rel < 1.1):
         cx, cy, cw = fx + fw / 2, fy + fh * 0.78, fw * 0.38
-    return (fx, fy, fw, fh), (cx, cy, cw * 1.08)
+    return (fx, fy, fw, fh), (cx, cy), cw, ang
+
+
+def _lip_gap(gray, cx, cy, cw, ang):
+    """Snap the mouth centre to the gap between the lips. Works in a de-rotated, enlarged strip under/over the
+    corner line: picks the dark run (closed-lip line or open mouth) nearest the corner line, searching further
+    down than up - landmark corners sit high on open mouths and on heads tilted forward. Returns new (cx, cy)."""
+    U = max(1.0, 80.0 / max(cw, 1.0))
+    Wd, Hd = int(cw * 0.6 * U), int(cw * 1.0 * U)
+    top = cw * 0.25  # strip spans cy - 0.25 cw .. cy + 0.75 cw (in mouth-aligned coords)
+    if Wd < 6 or Hd < 10:
+        return cx, cy
+    M = cv2.getRotationMatrix2D((cx, cy), ang, U)
+    M[0, 2] += Wd / 2.0 - cx; M[1, 2] += top * U - cy
+    strip = cv2.warpAffine(gray, M, (Wd, Hd), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE).astype(np.float32)
+    prof = strip[:, int(Wd * 0.2):int(Wd * 0.8) + 1].mean(axis=1)
+    prof = cv2.GaussianBlur(prof.reshape(-1, 1), (1, 0), max(0.6, U * 0.6)).ravel() if len(prof) > 3 else prof
+    ref, lo = float(np.percentile(prof, 75)), float(prof.min())
+    if ref - lo < 14:
+        return cx, cy  # no visible gap
+    thr = ref - max(10.0, 0.4 * (ref - lo))
+    dark = prof < thr
+    runs, i = [], 0
+    while i < len(dark):
+        if dark[i]:
+            j = i
+            while j + 1 < len(dark) and dark[j + 1]:
+                j += 1
+            runs.append((i, j)); i = j + 1
+        else:
+            i += 1
+    if not runs:
+        return cx, cy
+    c0 = top * U
+    def cost(r):
+        a, b = r
+        d = (a - c0) / (cw * U)
+        depth = (thr - prof[a:b + 1].min()) / max(1.0, ref - lo)
+        return (abs(d) * (2.5 if d < 0 else 1.2)) - depth * 0.35 + (5 if a <= 0 or d > 0.55 else 0)
+    a, b = min(runs, key=cost)
+    if cost((a, b)) >= 5:
+        return cx, cy
+    yy = (a + b) / 2.0  # closed: the line between the lips; open: the middle of the opening
+    dy = yy / U - top
+    r = math.radians(ang)  # back to image coords along the face's vertical axis
+    return cx - dy * math.sin(r), cy + dy * math.cos(r)
 
 
 def _fill_holes(m):
@@ -225,21 +329,21 @@ def drawn_face(rgb):
                 continue  # a pair of dots with nothing under them is not trusted as a face
             sc = ms + dy / dx
             if best is None or sc < best[0]:
-                best = (sc, dx, mx, my, mb)
+                best = (sc, dx, mx, my, mb, math.degrees(math.atan2(eb[2] - ea[2], eb[1] - ea[1])))
     if best is None or best[0] > 1.6:
         return None
-    _, dx, mx, my, (cx, cy, mw, mh) = best
+    sc, dx, mx, my, (cx, cy, mw, mh), ang = best
     inv = 1.0 / s
     face = (int((mx - dx * 1.1) * inv), int((my - dx * 1.0) * inv), int(dx * 2.2 * inv), int(dx * 2.3 * inv))
-    return face, (cx * inv, cy * inv, max(mw, dx * 0.3) * inv, max(mh, dx * 0.12) * inv)
+    return face, (cx * inv, cy * inv, max(mw, dx * 0.3) * inv, max(mh, dx * 0.12) * inv, float(ang)), float(sc)
 
 
 def _detect_mouth(rgb):
-    """Return (kind, face_rect, mouth) where kind is 'face', 'anime', 'drawn' or None.
-    mouth = (cx, cy, mw, mh) in image pixels: centre of the lips (the line between them), lip width
+    """Return (kind, face_rect, mouth, confidence) where kind is 'face', 'anime', 'drawn' or None.
+    mouth = (cx, cy, mw, mh[, angle]) in image pixels: centre of the lips (the line between them), lip width
     (corner to corner) and lip height.
     Order: YuNet landmarks (photos, 3D renders, painted faces) -> anime face cascade + mouth search
-    (anime/cartoon) -> drawn-face finder (stickman, emoji) -> classic face cascades."""
+    (anime/cartoon) -> drawn-face finder (stickman, emoji) -> classic face cascade."""
     h, w = rgb.shape[:2]
     s = min(1.0, 900.0 / max(h, w))
     small = cv2.resize(rgb, (max(1, int(w * s)), max(1, int(h * s))), interpolation=cv2.INTER_AREA) if s < 1 else rgb
@@ -248,10 +352,11 @@ def _detect_mouth(rgb):
     inv = 1.0 / s
     y = _detect_yunet(small)
     if y is not None:
-        (fx, fy, fw, fh), (cx, cy, mw) = y
-        cy = _lip_line(gray, cx, cy, mw, mw * 0.12)
+        (fx, fy, fw, fh), (cx, cy), cw, ang = y
+        cx, cy = _lip_gap(gray, cx, cy, cw, ang)
+        mw = cw * 1.08
         face = tuple(int(v * inv) for v in (fx, fy, fw, fh))
-        return "face", face, (cx * inv, cy * inv, mw * inv, mw * 0.42 * inv)
+        return "face", face, (cx * inv, cy * inv, mw * inv, mw * 0.42 * inv, float(ang)), 10.0
     pimg, p = _pad(small, 0.3)
     geq = cv2.equalizeHist(cv2.cvtColor(pimg, cv2.COLOR_RGB2GRAY))
     md = min(gray.shape)
@@ -262,21 +367,22 @@ def _detect_mouth(rgb):
         if c is None:
             continue
         try:
-            faces = c.detectMultiScale(geq, minSize=(max(24, int(md * 0.08)),) * 2, **kw)
+            r = c.detectMultiScale3(geq, minSize=(max(24, int(md * 0.08)),) * 2, outputRejectLevels=True, **kw)
+            faces, wts = r[0], r[2]
         except Exception:
-            faces = ()
-        for (x, y_, fw, fh) in faces:
-            found.append((kind, (x - p, y_ - p, fw, fh)))
+            faces, wts = (), ()
+        for (x, y_, fw, fh), wt in zip(faces, wts):
+            found.append((kind, (x - p, y_ - p, fw, fh), float(np.ravel(wt)[0]) if np.size(wt) else 0.0))
         if found:
             break
     d = drawn_face(rgb)
     if found:
-        kind, (x, y_, fw, fh) = max(found, key=lambda f: f[1][2] * f[1][3])
+        kind, (x, y_, fw, fh), conf = max(found, key=lambda f: f[1][2] * f[1][3])
         # a drawn face (eyes + mouth mark) inside the cascade's face box is the most precise answer
         if d is not None:
             dcx, dcy = d[1][0] * s, d[1][1] * s
             if x <= dcx <= x + fw and y_ + fh * 0.4 <= dcy <= y_ + fh * 1.05:
-                return kind, tuple(int(v * inv) for v in (x, y_, fw, fh)), d[1]
+                return kind, tuple(int(v * inv) for v in (x, y_, fw, fh)), d[1], max(conf, 3.0)
         if kind == "face":
             cx, cy, mw = x + fw * 0.5, y_ + fh * 0.775, fw * 0.36
         else:
@@ -287,22 +393,69 @@ def _detect_mouth(rgb):
             mw = float(np.clip(blob[2] * 1.05, fw * (0.12 if kind == "anime" else 0.26), fw * 0.5))
         else:
             cy = _lip_line(gray, cx, cy, mw, fh * 0.07)
-        return kind, tuple(int(v * inv) for v in (x, y_, fw, fh)), (cx * inv, cy * inv, mw * inv, mw * 0.36 * inv)
+        return kind, tuple(int(v * inv) for v in (x, y_, fw, fh)), (cx * inv, cy * inv, mw * inv, mw * 0.36 * inv), conf
     if d is not None:
-        return "drawn", d[0], d[1]
-    return None, None, None
+        return "drawn", d[0], d[1], float(np.clip(3.0 - d[2], 0.5, 3.0))
+    return None, None, None, 0.0
+
+
+def _rotated(rgb, deg):
+    """Rotate the whole picture by deg (counter-clockwise on screen) on an expanded canvas.
+    Returns (image, 2x3 matrix original->rotated)."""
+    h, w = rgb.shape[:2]
+    M = cv2.getRotationMatrix2D((w / 2.0, h / 2.0), deg, 1.0)
+    c, sn = abs(M[0, 0]), abs(M[0, 1])
+    nw, nh = int(h * sn + w * c), int(h * c + w * sn)
+    M[0, 2] += nw / 2.0 - w / 2.0; M[1, 2] += nh / 2.0 - h / 2.0
+    edge = np.concatenate([rgb[0], rgb[-1], rgb[:, 0], rgb[:, -1]])
+    col = [int(v) for v in np.median(edge, axis=0)]
+    return cv2.warpAffine(rgb, M, (nw, nh), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=col), M
+
+
+def mouth_angle(m):
+    return float(m[4]) if m is not None and len(m) > 4 else 0.0
+
+
+def scale_mouth(m, s, ox=0.0, oy=0.0):
+    """Mouth spot scaled by s after shifting by (-ox, -oy); the head angle is kept."""
+    if m is None:
+        return None
+    return ((m[0] - ox) * s, (m[1] - oy) * s, m[2] * s, m[3] * s, mouth_angle(m))
 
 
 def detect_mouth(rgb):
-    """detect_mouth(rgb) -> (kind, face_rect, mouth). A mouth that would fall outside the picture
-    (face cut off by the frame) is not used."""
-    kind, face, m = _detect_mouth(rgb)
+    """detect_mouth(rgb) -> (kind, face_rect, mouth). mouth = (cx, cy, mw, mh, angle): angle is the head roll in
+    degrees (positive = tilted clockwise on screen). Photo faces get their roll from the landmarks; for weak or
+    missing results the picture is also tried rotated (+-25, +-45 degrees) so strongly tilted anime, cartoon and
+    drawn heads are found upright. A mouth that would fall outside the picture is not used."""
+    h, w = rgb.shape[:2]
+    kind, face, m, conf = _detect_mouth(rgb)
+    if conf < 2.5:
+        small_s = min(1.0, 700.0 / max(h, w))
+        sm = cv2.resize(rgb, (max(1, int(w * small_s)), max(1, int(h * small_s))), interpolation=cv2.INTER_AREA) if small_s < 1 else rgb
+        best = None
+        for deg in (25, -25, 45, -45):
+            rimg, M = _rotated(sm, deg)
+            k2, f2, m2, c2 = _detect_mouth(rimg)
+            if m2 is None or (best is not None and c2 <= best[0]):
+                continue
+            best = (c2, deg, k2, f2, m2, M)
+        if best is not None and (m is None or (best[0] > conf + 0.7 and best[0] >= 2.0)):
+            c2, deg, k2, f2, m2, M = best
+            Mi = cv2.invertAffineTransform(M)
+            cx, cy = Mi @ np.array([m2[0], m2[1], 1.0])
+            fcx, fcy = Mi @ np.array([f2[0] + f2[2] / 2.0, f2[1] + f2[3] / 2.0, 1.0])
+            inv = 1.0 / small_s
+            kind = k2
+            face = (int((fcx - f2[2] / 2.0) * inv), int((fcy - f2[3] / 2.0) * inv), int(f2[2] * inv), int(f2[3] * inv))
+            # rotating the picture counter-clockwise by deg straightened a head tilted clockwise by deg
+            m = (cx * inv, cy * inv, m2[2] * inv, m2[3] * inv, mouth_angle(m2) + deg)
     if m is not None:
-        h, w = rgb.shape[:2]
-        cx, cy, mw, mh = (float(v) for v in m)
+        cx, cy, mw, mh = (float(v) for v in m[:4])
+        ang = float(np.clip(mouth_angle(m), -80, 80))
         if not (0 <= cx < w and 0 <= cy - mh * 0.3 and cy + mh * 0.3 < h) or mw < 4:
             return None, None, None
-        m = (cx, cy, mw, mh)
+        m = (cx, cy, mw, mh, ang)
     return kind, face, m
 
 
@@ -343,7 +496,7 @@ def recall_mouth(key):
     if m is None:
         return True, None
     try:
-        return True, tuple(float(v) for v in m[:4])
+        return True, tuple(float(v) for v in m[:5])
     except Exception:
         return False, None
 
@@ -355,7 +508,7 @@ def remember_mouth(key, mouth, forget=False):
         if forget:
             d.pop(key, None)
         else:
-            d[key] = {"m": None if mouth is None else [round(float(v), 2) for v in mouth[:4]], "t": int(time.time())}
+            d[key] = {"m": None if mouth is None else [round(float(v), 2) for v in mouth[:5]], "t": int(time.time())}
         if len(d) > 400:  # keep the newest
             for k in sorted(d, key=lambda k: d[k].get("t", 0) if isinstance(d[k], dict) else 0)[:len(d) - 400]:
                 d.pop(k, None)
@@ -437,17 +590,53 @@ def _smooth(t):
 
 
 def render_mouth(base, mouth, openness, width=1.0):
+    """Mouth opened by `openness` (0..1) on a copy of base. A tilted head (mouth[4] = roll angle) is handled by
+    straightening a patch around the mouth, opening the mouth along the face's own up/down axis, and
+    rotating the changed pixels back."""
+    ang = mouth_angle(mouth)
+    if mouth is None or openness <= 0.02 or abs(ang) < 2.0:
+        return _render_axis(base, mouth, openness, width)
+    H, W = base.shape[:2]
+    cx, cy, mw = float(mouth[0]), float(mouth[1]), max(4.0, float(mouth[2]))
+    half = int(math.ceil(2.6 * mw)) + 2
+    S = 2 * half
+    M = cv2.getRotationMatrix2D((cx, cy), ang, 1.0)  # image -> straight patch
+    M[0, 2] += half - cx; M[1, 2] += half - cy
+    patch = cv2.warpAffine(base, M, (S, S), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+    opened = _render_axis(patch, (half, half, mw, float(mouth[3])), openness, width)
+    diff = (np.abs(opened.astype(np.int16) - patch.astype(np.int16)).max(axis=2) > 1).astype(np.uint8)
+    if not diff.any():
+        return base
+    diff = cv2.dilate(diff, np.ones((3, 3), np.uint8))
+    al = cv2.GaussianBlur(diff.astype(np.float32), (0, 0), max(0.8, mw * 0.03))
+    # back into the picture, only over the patch's footprint
+    r = int(math.ceil(half * 1.4143)) + 2
+    x0, y0, x1, y1 = max(0, int(cx) - r), max(0, int(cy) - r), min(W, int(cx) + r + 1), min(H, int(cy) + r + 1)
+    if x1 - x0 < 2 or y1 - y0 < 2:
+        return base
+    Mi = cv2.invertAffineTransform(M)
+    Mi[0, 2] -= x0; Mi[1, 2] -= y0
+    back = cv2.warpAffine(opened, Mi, (x1 - x0, y1 - y0), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
+    a = cv2.warpAffine(al, Mi, (x1 - x0, y1 - y0), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+    a = np.clip(a, 0, 1)[..., None]
+    out = base.copy()
+    reg = out[y0:y1, x0:x1].astype(np.float32)
+    out[y0:y1, x0:x1] = np.clip(reg * (1 - a) + back.astype(np.float32) * a, 0, 255).astype(np.uint8)
+    return out
+
+
+def _render_axis(base, mouth, openness, width=1.0):
     """Return a copy of base (HxWx3 uint8 RGB) with the mouth opened by `openness` (0..1).
-    The jaw/lower lip is warped down with a smooth displacement field, the upper lip lifts slightly,
+    The jaw/lower lip is warped down and the upper lip up with a smooth displacement field (centred on the lip line),
     and a soft-edged mouth cavity (dark interior, teeth hint, tongue) is blended into the gap."""
     if mouth is None or openness <= 0.02:
         return base
     H, W = base.shape[:2]
-    cx, cy, mw, mh = mouth
+    cx, cy, mw, mh = mouth[:4]
     mw = max(4.0, mw)
     openness = float(min(1.0, openness))
-    gap = openness * 0.30 * mw  # open distance in px
-    lift = gap * 0.18
+    G = openness * 0.36 * mw  # total opening in px, centred on the lip line so the mouth stays on the lips:
+    gap, lift = G * 0.62, G * 0.38  # the jaw/lower lip drops a bit more than the upper lip rises
     x0, x1 = int(max(0, cx - 1.9 * mw)), int(min(W, cx + 1.9 * mw))
     y0, y1 = int(max(0, cy - 0.9 * mw)), int(min(H, cy + 2.0 * mw))
     if x1 - x0 < 4 or y1 - y0 < 4:
@@ -469,7 +658,7 @@ def render_mouth(base, mouth, openness, width=1.0):
     # cavity: lens shape - flatter upper lip line, rounder lower lip
     ax = max(1.5, mw * 0.40 * width * (0.80 + 0.20 * openness))
     ecx, ecy = cx - x0, cy - y0 - lift
-    ay_t, ay_b = max(0.6, lift * 1.1 + gap * 0.08), max(1.0, gap * 0.95)
+    ay_t, ay_b = max(0.6, lift * 1.05), max(1.0, gap * 0.95)
     t = np.linspace(0, 2 * np.pi, 72, endpoint=False)
     sn = np.sin(t)
     px = ecx + ax * np.cos(t) * (1 - 0.08 * np.abs(sn))
@@ -572,7 +761,7 @@ def ffmpeg_exe():
 def export_mp4(base_rgb, mouth, wav_path, out_path, fps=FPS, progress=None, shots=None):
     """Render the lip sync animation + TTS audio to an H.264/AAC MP4."""
     img, s = fit_even(base_rgb)
-    m = None if mouth is None else (mouth[0] * s, mouth[1] * s, mouth[2] * s, mouth[3] * s)
+    m = scale_mouth(mouth, s)
     samples, sr = load_wav(wav_path)
     op, wd = lipsync_track(samples, sr, fps)
     tail = int(fps * 0.4)

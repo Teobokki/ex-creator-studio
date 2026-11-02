@@ -5,7 +5,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
 APP = "EX CREATOR STUDIO"
-APP_VERSION = "1.5.1"
+APP_VERSION = "1.5.2"
 COPYRIGHT = "\u00a92026 EX Inc./HYPERION DIGITAL \u00a92026"
 REPO = "Teobokki/ex-creator-studio"
 UPDATE_URL = "https://raw.githubusercontent.com/%s/main/latest.json" % REPO
@@ -33,6 +33,16 @@ import ecs_tts as tts
 
 def res_path(*n):
     return core.res_path(*n)
+
+
+def mouth_outline(cx, cy, rx, ry, ang_deg, n=28):
+    """Flat [x0, y0, x1, y1, ...] of an ellipse turned by the head angle (for the canvas mouth marker)."""
+    import math
+    a = math.radians(ang_deg); ca, sa = math.cos(a), math.sin(a); pts = []
+    for i in range(n):
+        t = 2 * math.pi * i / n; x, y = rx * math.cos(t), ry * math.sin(t)
+        pts += [cx + x * ca - y * sa, cy + x * sa + y * ca]
+    return pts
 
 
 def downloads_dir():
@@ -410,11 +420,11 @@ class Studio(tk.Tk):
         if self.mouth is None:
             return None
         s = self.disp_s
-        return (self.mouth[0] * s, self.mouth[1] * s, self.mouth[2] * s, self.mouth[3] * s)
+        return core.scale_mouth(self.mouth, s)
 
     def _marker_box(self):
         """Mouth spot on the canvas: (x0, y0, x1, y1) of the lips ellipse (at least a few px so it can be grabbed)."""
-        cx, cy, mw, mh = self._disp_mouth()
+        cx, cy, mw, mh = self._disp_mouth()[:4]
         ox, oy = self.disp_off
         hw, hh = max(5.0, mw / 2), max(3.0, mh / 2)
         return ox + cx - hw, oy + cy - hh, ox + cx + hw, oy + cy + hh
@@ -426,7 +436,9 @@ class Studio(tk.Tk):
         if not (self.set_mode or self.hover or self.mdrag or time.time() < self.marker_until):
             return
         x0, y0, x1, y1 = self._marker_box()
-        self.cv.create_oval(x0, y0, x1, y1, outline=RED, width=1, dash=(3, 2), tags="marker")
+        self.cv.create_polygon(*mouth_outline((x0 + x1) / 2, (y0 + y1) / 2, (x1 - x0) / 2, (y1 - y0) / 2,
+                                              core.mouth_angle(self.mouth)),
+                               outline=RED, fill="", width=1, dash=(3, 2), tags="marker")
         self.cv.create_rectangle(x1 - 3, y1 - 3, x1 + 3, y1 + 3, fill=RED, outline="white", width=1, tags="marker")
         if self.set_mode or self.mdrag:
             self.cv.create_text((x0 + x1) / 2, y0 - 9, text="mouth", fill=RED, font=(FONT, 8, "bold"), tags="marker")
@@ -562,12 +574,12 @@ class Studio(tk.Tk):
             mode, dx, dy, m0 = self.mdrag
             ix, iy = self._to_img(e)
             h, w = self.src.shape[:2]
-            cx, cy, mw, mh = self.mouth
+            cx, cy, mw, mh = self.mouth[:4]
             if mode == "move":
                 cx, cy = float(np.clip(ix - dx, 0, w - 1)), float(np.clip(iy - dy, 0, h - 1))
             else:
                 mw = float(np.clip(abs(ix - cx) * 2, 6, w)); mh = float(np.clip(abs(iy - cy) * 2, 3, h))
-            self.mouth = (cx, cy, mw, mh)
+            self.mouth = (cx, cy, mw, mh, core.mouth_angle(self.mouth))
             self._draw_marker()
             return
         if not self.set_mode and self.sdrag and self.sel is not None:
@@ -613,7 +625,8 @@ class Studio(tk.Tk):
             cx, cy, mw, mh = (ax + bx) / 2, (ay + by) / 2, max(6.0, bx - ax), max(3.0, by - ay)
         if not (0 <= cx < w and 0 <= cy < h):
             return
-        self.mouth = (cx, cy, mw, mh); self.kind = "manual"
+        ang = core.mouth_angle(self.mouth) if abs(e.x - x0) < 8 and abs(e.y - y0) < 8 else 0.0  # a drawn box is level
+        self.mouth = (cx, cy, mw, mh, ang); self.kind = "manual"
         self._save_mouth()
         self._update_chip(); self._draw_marker()
         self.set_status("Mouth set \u2014 lip sync ON. Click again to adjust, Esc when done.", GREEN)
@@ -664,7 +677,7 @@ class Studio(tk.Tk):
     def _chest_pos(self, n, shot_h=0.0):
         h, w = self.src.shape[:2]
         if self.mouth is not None:
-            cx, cy, mw, mh = self.mouth
+            cx, cy, mw, mh = self.mouth[:4]
             fh = self.face[3] if self.face is not None and self.kind != "manual" else mw * 2.8
             x, y = cx, cy + fh * 1.5
         else:

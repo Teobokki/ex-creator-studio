@@ -398,7 +398,9 @@ class StudioPanel(tk.Frame):
                            font=(F, 8, "bold"), justify="center", tags="ui")
         elif self.mouth is not None and not self.playing and (self.set_mode or self.hover or self.mdrag or time.time() < self.marker_until):
             x0, y0, x1, y1 = self._marker_box()
-            cv.create_oval(x0, y0, x1, y1, outline=self.ui.RED, width=1, dash=(3, 2), tags="ui")
+            cv.create_polygon(*self.ui.mouth_outline((x0 + x1) / 2, (y0 + y1) / 2, (x1 - x0) / 2, (y1 - y0) / 2,
+                                                     core.mouth_angle(self.mouth)),
+                              outline=self.ui.RED, fill="", width=1, dash=(3, 2), tags="ui")
             cv.create_rectangle(x1 - 3, y1 - 3, x1 + 3, y1 + 3, fill=self.ui.RED, outline="white", width=1, tags="ui")
         if self.set_mode and self.sq is not None:
             x, y, S = st.overlay_geom(dw, dh)
@@ -514,7 +516,7 @@ class StudioPanel(tk.Frame):
 
     def _marker_box(self):
         x, y, S = self._sq_rect(); k = S / float(st.SQ)
-        cx, cy, mw, mh = [v * k for v in self.mouth]
+        cx, cy, mw, mh = [v * k for v in self.mouth[:4]]
         hw, hh = max(4.0, mw / 2), max(3.0, mh / 2)
         return x + cx - hw, y + cy - hh, x + cx + hw, y + cy + hh
 
@@ -547,7 +549,8 @@ class StudioPanel(tk.Frame):
         if not self.img_key or self.crop is None:
             return
         x0, y0, s = self.crop
-        m = None if self.mouth is None else (self.mouth[0] / s + x0, self.mouth[1] / s + y0, self.mouth[2] / s, self.mouth[3] / s)
+        m = None if self.mouth is None else (self.mouth[0] / s + x0, self.mouth[1] / s + y0, self.mouth[2] / s,
+                                             self.mouth[3] / s, core.mouth_angle(self.mouth))
         core.remember_mouth(self.img_key, m)
 
     def _press(self, e):
@@ -568,12 +571,12 @@ class StudioPanel(tk.Frame):
         if self.mdrag:
             mode, dx, dy, m0 = self.mdrag
             sx, sy = self._to_sq(e.x, e.y)
-            cx, cy, mw, mh = self.mouth
+            cx, cy, mw, mh = self.mouth[:4]
             if mode == "move":
                 cx, cy = float(np.clip(sx - dx, 0, st.SQ - 1)), float(np.clip(sy - dy, 0, st.SQ - 1))
             else:
                 mw = float(np.clip(abs(sx - cx) * 2, 6, st.SQ)); mh = float(np.clip(abs(sy - cy) * 2, 3, st.SQ))
-            self.mouth = (cx, cy, mw, mh)
+            self.mouth = (cx, cy, mw, mh, core.mouth_angle(self.mouth))
             self.render()
             return
         if self.set_mode and self.drag0:
@@ -604,7 +607,8 @@ class StudioPanel(tk.Frame):
             cx, cy, mw, mh = (ax + bx) / 2, (ay + by) / 2, max(6.0, bx - ax), max(3.0, by - ay)
         if not (0 <= cx < st.SQ and 0 <= cy < st.SQ):
             return
-        self.mouth, self.kind = (cx, cy, mw, mh), "manual"
+        ang = core.mouth_angle(self.mouth) if abs(e.x - x0) < 6 and abs(e.y - y0) < 6 else 0.0
+        self.mouth, self.kind = (cx, cy, mw, mh, ang), "manual"
         self._save_mouth()
         self._update_chip()
         self.set_status("Mouth set \u2014 lip sync ON. Esc when done.", self.ui.GREEN)

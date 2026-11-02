@@ -161,7 +161,7 @@ def make_square_ex(rgb, mouth=None, manual=False):
     sq = cv2.resize(crop, (SQ, SQ), interpolation=cv2.INTER_AREA if s < 1 else cv2.INTER_CUBIC)
     m = None
     if mouth is not None:
-        m = ((mouth[0] - x0) * s, (mouth[1] - y0) * s, mouth[2] * s, mouth[3] * s)
+        m = core.scale_mouth(mouth, s, x0, y0)
         if not (0 <= m[0] < SQ and 0 <= m[1] < SQ):
             m = None
     return np.ascontiguousarray(sq), (kind if m is not None else None), m, (x0, y0, s)
@@ -198,7 +198,7 @@ def char_frame(sq, mouth, op, wf, S):
     img = cv2.resize(sq, (S, S), interpolation=cv2.INTER_AREA)
     if mouth is not None and op > 0.02:
         k = S / float(SQ)
-        img = core.render_mouth(img, (mouth[0] * k, mouth[1] * k, mouth[2] * k, mouth[3] * k), op, wf)
+        img = core.render_mouth(img, core.scale_mouth(mouth, k), op, wf)
     return img
 
 

@@ -18,6 +18,12 @@ The **REX BOARD** shows one character or piece of art. It is the screen the app 
 - **Download.** Renders the lip-sync animation and the voice into an H.264/AAC MP4. It saves to `Downloads\EX CREATOR STUDIO <date time>.mp4`.
 - **Check for updates.** Reads `latest.json` from this repo and installs newer versions.
 
+## New in 1.5.2
+### Lip sync stays on the lips for tilted heads
+- The mouth no longer slides down onto the chin. The mouth now opens evenly around the line between the lips (upper lip up, jaw down), so a character whose mouth is already open opens it wider in place instead of growing a second mouth above it.
+- More precise on small and tilted faces. Each face is straightened and enlarged, then its eyes and mouth corners are found again. The mouth snaps to the real gap between the lips, which sits lower than the corners on open mouths and on heads tilted forward.
+- The animated mouth turns with the head. Strongly tilted anime, cartoon and drawn heads are also found. The mouth spot marker turns with the head too.
+
 ## New in 1.5.1
 ### Lip sync lands on the lips
 - The mouth is now found from the real mouth corners of the face (YuNet landmarks) on photos and 3D or painted characters, so the animated mouth sits on the lips and is as wide as them.
