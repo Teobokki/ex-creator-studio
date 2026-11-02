@@ -1,12 +1,12 @@
 {
-  "version": "1.5.0",
-  "url": "https://github.com/Teobokki/ex-creator-studio/releases/download/v1.5.0/EX.CREATOR.STUDIO.Setup.1.5.0.exe",
-  "installer_url": "https://github.com/Teobokki/ex-creator-studio/releases/download/v1.5.0/EX.CREATOR.STUDIO.Setup.1.5.0.exe",
-  "full_url": "https://github.com/Teobokki/ex-creator-studio/releases/download/v1.5.0/EX.CREATOR.STUDIO.zip",
-  "portable_url": "https://github.com/Teobokki/ex-creator-studio/releases/download/v1.5.0/EX.CREATOR.STUDIO.zip",
-  "release_url": "https://github.com/Teobokki/ex-creator-studio/releases/tag/v1.5.0",
-  "sha256": "abf60c828ca23c3199aefdd07ab2f279c76e557f425dda665fe50ace36251e1c",
-  "zip_sha256": "88b62d2c2d87d6c83db6d5da3726dca30abd849f4e009ed6b194318b7648aef8",
-  "released": "2026-10-30",
-  "notes": "New: REX ANIMATE frame-by-frame animation - timeline with holds, layers, colour wheel, editable text over frame ranges, screenshots, audio track and MP4 / GIF / PNG export."
+  "version": "1.5.1",
+  "url": "https://github.com/Teobokki/ex-creator-studio/releases/download/v1.5.1/EX.CREATOR.STUDIO.Setup.1.5.1.exe",
+  "installer_url": "https://github.com/Teobokki/ex-creator-studio/releases/download/v1.5.1/EX.CREATOR.STUDIO.Setup.1.5.1.exe",
+  "full_url": "https://github.com/Teobokki/ex-creator-studio/releases/download/v1.5.1/EX.CREATOR.STUDIO.zip",
+  "portable_url": "https://github.com/Teobokki/ex-creator-studio/releases/download/v1.5.1/EX.CREATOR.STUDIO.zip",
+  "release_url": "https://github.com/Teobokki/ex-creator-studio/releases/tag/v1.5.1",
+  "sha256": "2583541cb3c0a1602460d6e624509e8b7098e45aadd7960e5d8e4bfa1b6c4d90",
+  "zip_sha256": "8a61cfe5a127731faadab59ad296e21f78acce0d5eb3abedfd871fab26686688",
+  "released": "2026-11-02",
+  "notes": "Lip sync fix: the animated mouth now sits on the character's lips (mouth-corner face landmarks for photos/3D/painted faces, better anime mouth finding, automatic lip sync for stickmen/emoji/drawn faces). Drag the small red mouth spot to move or resize it; it is remembered per picture on REX BOARD and EX STUDIO and used in the downloaded video."
 }
