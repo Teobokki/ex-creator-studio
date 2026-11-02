@@ -1,12 +1,12 @@
 {
-  "version": "1.5.2",
-  "url": "https://github.com/Teobokki/ex-creator-studio/releases/download/v1.5.2/EX.CREATOR.STUDIO.Setup.1.5.2.exe",
-  "installer_url": "https://github.com/Teobokki/ex-creator-studio/releases/download/v1.5.2/EX.CREATOR.STUDIO.Setup.1.5.2.exe",
-  "full_url": "https://github.com/Teobokki/ex-creator-studio/releases/download/v1.5.2/EX.CREATOR.STUDIO.zip",
-  "portable_url": "https://github.com/Teobokki/ex-creator-studio/releases/download/v1.5.2/EX.CREATOR.STUDIO.zip",
-  "release_url": "https://github.com/Teobokki/ex-creator-studio/releases/tag/v1.5.2",
-  "sha256": "45e9608911d3920ec4a20f1b075132bc3f6edb210392e076d1cc40ea76dec2c3",
-  "zip_sha256": "f16be9a2a59cf8653a184dd10c68642c20e46913305f06b0edc514d8cf9bd7fc",
+  "version": "1.5.3",
+  "url": "https://github.com/Teobokki/ex-creator-studio/releases/download/v1.5.3/EX.CREATOR.STUDIO.Setup.1.5.3.exe",
+  "installer_url": "https://github.com/Teobokki/ex-creator-studio/releases/download/v1.5.3/EX.CREATOR.STUDIO.Setup.1.5.3.exe",
+  "full_url": "https://github.com/Teobokki/ex-creator-studio/releases/download/v1.5.3/EX.CREATOR.STUDIO.zip",
+  "portable_url": "https://github.com/Teobokki/ex-creator-studio/releases/download/v1.5.3/EX.CREATOR.STUDIO.zip",
+  "release_url": "https://github.com/Teobokki/ex-creator-studio/releases/tag/v1.5.3",
+  "sha256": "88541aa3bfedb74ad85e7aa53f4c07b04f3c7a3fab3e46e3eb3eba4366ef7ba2",
+  "zip_sha256": "3070a092b03eef0259258b1eccc6963d3294d6b4ac8dd1858bfc62b89efe17b6",
   "released": "2026-11-02",
-  "notes": "Lip sync stays on the lips: the mouth opens around the lip line instead of sliding onto the chin, small and head-down faces are measured more precisely, and the mouth turns with tilted heads (photos, anime, cartoons and stickmen)."
+  "notes": "Bigger, clearer lip sync: the mouth now opens wide on each syllable of normal speech, still closes between syllables and on silence, and stays on the lips (REX BOARD, EX STUDIO and the downloaded MP4)."
 }
