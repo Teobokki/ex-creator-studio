@@ -570,11 +570,24 @@ def lipsync_track(samples, sr, fps=FPS, lead_s=0.04):
     gate = 0.08
     x = np.clip((x - gate) / (1 - gate), 0, 1.25) ** 0.7
     x = np.clip(x, 0, 1)
+    # articulation: take part of the slow "floor" out so the mouth closes between syllables, not only on pauses
+    k = max(1, int(round(fps * 0.12)))
+    pad = np.pad(x, k, mode="edge")
+    floor = np.array([pad[i:i + 2 * k + 1].min() for i in range(len(x))], np.float32)
+    x = np.clip(x - 0.55 * floor, 0, None)
     out = np.zeros_like(x)
     v = 0.0
-    for i, t in enumerate(x):  # fast attack, slower release
-        v += (t - v) * (0.75 if t > v else 0.45)
+    for i, t in enumerate(x):  # fast attack, quick release (so it can close between syllables)
+        v += (t - v) * (0.75 if t > v else 0.55)
         out[i] = v
+    # open wide: typical syllable peaks of normal speech reach ~0.92 (a big, clear opening), loud ones cap at 1
+    pk = [out[i] for i in range(1, len(out) - 1) if out[i] >= out[i - 1] and out[i] > out[i + 1] and out[i] > 0.08]
+    if pk:
+        ref = float(np.percentile(pk, 60))
+        if ref > 1e-3:
+            out = out * (0.92 / ref)
+    out = np.clip(out, 0, 1)
+    out[out < 0.06] = 0.0  # shut on silence
     # brightness -> width: centroid ~ 500 Hz (oo) .. 3000 Hz (ee/s)
     b = np.clip((cen - 700) / 2300, 0, 1)
     wf = 0.82 + 0.36 * b

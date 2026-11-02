@@ -1,4 +1,4 @@
-﻿#define MyVer "1.5.2"
+﻿#define MyVer "1.5.3"
 [Setup]
 AppId={{C3E7A1D4-5B2F-4E8A-9C61-0A1B2C3D4E5F}
 AppName=EX CREATOR STUDIO

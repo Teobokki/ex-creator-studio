@@ -18,6 +18,11 @@ The **REX BOARD** shows one character or piece of art. It is the screen the app 
 - **Download.** Renders the lip-sync animation and the voice into an H.264/AAC MP4. It saves to `Downloads\EX CREATOR STUDIO <date time>.mp4`.
 - **Check for updates.** Reads `latest.json` from this repo and installs newer versions.
 
+## New in 1.5.3
+### Bigger, clearer mouth movement
+- The mouth opens wider when the character talks. Normal speech now reaches a big, clear opening on each syllable, where before the opening was smaller.
+- It still closes between syllables and on silence, and the opening stays on the lips. This applies on REX BOARD, in the EX STUDIO character square and in the downloaded MP4.
+
 ## New in 1.5.2
 ### Lip sync stays on the lips for tilted heads
 - The mouth no longer slides down onto the chin. The mouth now opens evenly around the line between the lips (upper lip up, jaw down), so a character whose mouth is already open opens it wider in place instead of growing a second mouth above it.
