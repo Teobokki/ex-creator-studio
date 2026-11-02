@@ -5,7 +5,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
 APP = "EX CREATOR STUDIO"
-APP_VERSION = "1.5.3"
+APP_VERSION = "1.5.4"
 COPYRIGHT = "\u00a92026 EX Inc./HYPERION DIGITAL \u00a92026"
 REPO = "Teobokki/ex-creator-studio"
 UPDATE_URL = "https://raw.githubusercontent.com/%s/main/latest.json" % REPO

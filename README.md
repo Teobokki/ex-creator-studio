@@ -18,6 +18,15 @@ The **REX BOARD** shows one character or piece of art. It is the screen the app 
 - **Download.** Renders the lip-sync animation and the voice into an H.264/AAC MP4. It saves to `Downloads\EX CREATOR STUDIO <date time>.mp4`.
 - **Check for updates.** Reads `latest.json` from this repo and installs newer versions.
 
+## New in 1.5.4
+### One natural mouth, on the real lips
+- When the character talks, the real upper lip now moves up and the real lower lip and jaw move down. Only the gap that opens between them is filled, with a dark, rounded mouth inside.
+- No more second copy of the lips, flat pink slab or stretched smear on closed-mouth photos.
+- The opening follows the lip line (flat, smiling or tilted) and tapers into the real mouth corners, never wider.
+- Black-and-white pictures get a dark grey mouth inside.
+- Anime faces with a drawn open mouth are found more reliably.
+- The mouth still opens wide on each syllable and closes between syllables and on silence. This works on REX BOARD, the EX STUDIO square and the downloaded MP4.
+
 ## New in 1.5.3
 ### Bigger, clearer mouth movement
 - The mouth opens wider when the character talks. Normal speech now reaches a big, clear opening on each syllable, where before the opening was smaller.
