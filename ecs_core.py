@@ -235,51 +235,83 @@ def _detect_yunet(small):
     rel = ((cx - (fx + fw / 2)) * -math.sin(r) + (cy - (fy + fh / 2)) * math.cos(r)) / max(fh, 1) + 0.5
     if not (eye_d * 0.45 < cw < eye_d * 1.6) or not (0.4 < rel < 1.1):
         cx, cy, cw = fx + fw / 2, fy + fh * 0.78, fw * 0.38
-    return (fx, fy, fw, fh), (cx, cy), cw, ang
+    return (fx, fy, fw, fh), (cx, cy), cw, ang, (float(v[8]), float(v[9]))
 
 
-def _lip_gap(gray, cx, cy, cw, ang):
-    """Snap the mouth centre to the gap between the lips. Works in a de-rotated, enlarged strip under/over the
-    corner line: picks the dark run (closed-lip line or open mouth) nearest the corner line, searching further
-    down than up - landmark corners sit high on open mouths and on heads tilted forward. Returns new (cx, cy)."""
+def _lip_gap(gray, cx, cy, cw, ang, rgb=None, nose=None):
+    """Snap the mouth centre onto the seam between the lips (closed) or the middle of the opening (open).
+    The landmark corners often sit on the lower lip or under it (3D renders, smiles, heads turned or tilted forward),
+    so the search covers the band from just under the nose to well under the corners, in a de-rotated, enlarged
+    strip. Every dark valley in the brightness profile is a candidate; the seam is the deepest, most prominent
+    valley with lip (redder than skin) on BOTH sides. The shadow under the lower lip has lip only above it and
+    chin skin below, a moustache or nostril shadow has skin/hair above it, so neither wins. Returns new (cx, cy)."""
     U = max(1.0, 80.0 / max(cw, 1.0))
-    Wd, Hd = int(cw * 0.6 * U), int(cw * 1.0 * U)
-    top = cw * 0.25  # strip spans cy - 0.25 cw .. cy + 0.75 cw (in mouth-aligned coords)
+    r = math.radians(ang)
+    up = 0.45
+    if nose is not None:  # never above the point 40% of the way from the nose to the corner line
+        nd = (nose[0] - cx) * -math.sin(r) + (nose[1] - cy) * math.cos(r)
+        if nd < -0.1 * cw:
+            up = float(np.clip(-0.6 * nd / cw, 0.12, 0.45))
+    dn = 0.6
+    top = cw * up
+    Wd, Hd = int(cw * 0.6 * U), int(cw * (up + dn) * U)
     if Wd < 6 or Hd < 10:
         return cx, cy
     M = cv2.getRotationMatrix2D((cx, cy), ang, U)
     M[0, 2] += Wd / 2.0 - cx; M[1, 2] += top * U - cy
     strip = cv2.warpAffine(gray, M, (Wd, Hd), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE).astype(np.float32)
-    prof = strip[:, int(Wd * 0.2):int(Wd * 0.8) + 1].mean(axis=1)
-    prof = cv2.GaussianBlur(prof.reshape(-1, 1), (1, 0), max(0.6, U * 0.6)).ravel() if len(prof) > 3 else prof
-    ref, lo = float(np.percentile(prof, 75)), float(prof.min())
-    if ref - lo < 14:
-        return cx, cy  # no visible gap
-    thr = ref - max(10.0, 0.4 * (ref - lo))
-    dark = prof < thr
-    runs, i = [], 0
-    while i < len(dark):
-        if dark[i]:
-            j = i
-            while j + 1 < len(dark) and dark[j + 1]:
-                j += 1
-            runs.append((i, j)); i = j + 1
-        else:
-            i += 1
-    if not runs:
-        return cx, cy
+    sl = slice(int(Wd * 0.25), int(Wd * 0.75) + 1)
+    prof = strip[:, sl].mean(axis=1)
+    sig = max(0.6, U * 0.5)
+    prof = cv2.GaussianBlur(prof.reshape(-1, 1), (1, 0), sig).ravel() if len(prof) > 3 else prof
+    red = None
+    if rgb is not None:
+        cs = cv2.warpAffine(rgb, M, (Wd, Hd), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+        lab = cv2.cvtColor(cs, cv2.COLOR_RGB2LAB).astype(np.float32)
+        red = lab[:, sl, 1].mean(axis=1)
+        sat = float(np.mean(cs.max(axis=2).astype(np.float32) - cs.min(axis=2)))
+        if sat < 12:
+            red = None  # black-and-white picture: no colour to go by
+    hi, lo = float(np.percentile(prof, 90)), float(prof.min())
+    if hi - lo < 10:
+        return cx, cy  # flat: no visible seam
     c0 = top * U
-    def cost(r):
-        a, b = r
-        d = (a - c0) / (cw * U)
-        depth = (thr - prof[a:b + 1].min()) / max(1.0, ref - lo)
-        return (abs(d) * (2.5 if d < 0 else 1.2)) - depth * 0.35 + (5 if a <= 0 or d > 0.55 else 0)
-    a, b = min(runs, key=cost)
-    if cost((a, b)) >= 5:
+    unit = cw * U
+    win = int(max(3, 0.25 * unit))
+    skin = None
+    if red is not None:
+        ends = np.concatenate([red[:max(2, int(0.08 * unit))], red[-max(2, int(0.15 * unit)):]])
+        skin = float(np.median(ends))
+    best, bscore = None, -1e9
+    n = len(prof)
+    for i in range(1, n - 1):
+        if not (prof[i] <= prof[i - 1] and prof[i] < prof[i + 1]):
+            continue
+        lm = float(prof[max(0, i - win):i].max()); rm = float(prof[i + 1:i + 1 + win].max())
+        prom = (min(lm, rm) - prof[i]) / (hi - lo)
+        if prom < 0.08:
+            continue
+        d = (i - c0) / unit
+        score = prom - 1.1 * abs(d) - (0.25 * (d - 0.35) / 0.25 if d > 0.35 else 0.0)
+        if skin is not None:
+            k1, k2 = max(1, int(0.03 * unit)), max(2, int(0.13 * unit))
+            above = float(red[max(0, i - k2):max(1, i - k1)].mean()) - skin
+            below = float(red[min(n - 1, i + k1):min(n, i + k2)].mean()) - skin
+            score += 0.06 * float(np.clip(min(above, below), -4, 6))
+        if score > bscore:
+            best, bscore = i, score
+    if best is None:
         return cx, cy
-    yy = (a + b) / 2.0  # closed: the line between the lips; open: the middle of the opening
+    # an open mouth is a wide dark run: use the middle of it, a closed mouth gives the seam line itself
+    thr = prof[best] + 0.35 * (min(float(prof[max(0, best - win):best].max()), float(prof[best + 1:best + 1 + win].max())) - prof[best])
+    a = best
+    while a > 0 and prof[a - 1] < thr:
+        a -= 1
+    b = best
+    while b < n - 1 and prof[b + 1] < thr:
+        b += 1
+    yy = (a + b) / 2.0 if (b - a) > 0.12 * unit else float(best)
     dy = yy / U - top
-    r = math.radians(ang)  # back to image coords along the face's vertical axis
     return cx - dy * math.sin(r), cy + dy * math.cos(r)
 
 
@@ -364,8 +396,8 @@ def _detect_mouth(rgb):
     inv = 1.0 / s
     y = _detect_yunet(small)
     if y is not None:
-        (fx, fy, fw, fh), (cx, cy), cw, ang = y
-        cx, cy = _lip_gap(gray, cx, cy, cw, ang)
+        (fx, fy, fw, fh), (cx, cy), cw, ang, nose = y
+        cx, cy = _lip_gap(gray, cx, cy, cw, ang, small, nose)
         mw = cw * 1.08
         a = _anime_mouth(small, (fx, fy, fw, fh))
         if a is not None:  # a drawn (anime) face: its mouth is a drawn shape, the photo landmarks only guess it
@@ -769,7 +801,12 @@ def _flat_art(roi):
         return False
     r = roi.astype(np.int16)
     same = ((np.abs(r[1:, 1:] - r[:-1, 1:]).max(axis=2) <= 2) & (np.abs(r[1:, 1:] - r[1:, :-1]).max(axis=2) <= 2)).mean()
-    return bool(same > 0.55)
+    if same <= 0.55:
+        return False
+    # smooth 3D renders also change slowly from pixel to pixel, but they are gradients: drawn art is a few flat
+    # colours that cover most of the area (renders get the natural photo mouth, never a flat dark slab)
+    _, cnt = np.unique((r.reshape(-1, 3) // 4), axis=0, return_counts=True)
+    return bool(np.sort(cnt)[::-1][:6].sum() / float(r.shape[0] * r.shape[1]) > 0.35)
 
 
 def _lip_mask(roi, cx, Lrow, mw, hw):
