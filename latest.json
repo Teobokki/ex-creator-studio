@@ -1,12 +1,11 @@
 {
-  "version": "1.5.5",
-  "url": "https://github.com/Teobokki/ex-creator-studio/releases/download/v1.5.5/EX.CREATOR.STUDIO.Setup.1.5.5.exe",
-  "installer_url": "https://github.com/Teobokki/ex-creator-studio/releases/download/v1.5.5/EX.CREATOR.STUDIO.Setup.1.5.5.exe",
-  "full_url": "https://github.com/Teobokki/ex-creator-studio/releases/download/v1.5.5/EX.CREATOR.STUDIO.zip",
-  "portable_url": "https://github.com/Teobokki/ex-creator-studio/releases/download/v1.5.5/EX.CREATOR.STUDIO.zip",
-  "release_url": "https://github.com/Teobokki/ex-creator-studio/releases/tag/v1.5.5",
-  "sha256": "e86b5e256e1b4ff8ea9ecd76d5bb622b0ba4c9bcb566cb040272d756c897b395",
-  "zip_sha256": "86bc5e7cbaa9dd44d95b63da331bb37df0ffb497c3e083c547f128b2168070ac",
-  "released": "2026-11-02",
-  "notes": "Lip sync like the store presenter: full natural lips with a rosy tone, opening to a soft dark-red gap with a hint of upper teeth. Natural speech peaks that close between syllables, rounder for o/u and wider for e/i. Drawn faces keep their style (REX BOARD, EX STUDIO and the downloaded MP4)."
+  "version": "1.5.6",
+  "url": "https://github.com/Teobokki/ex-creator-studio/releases/download/v1.5.6/EX.CREATOR.STUDIO.Setup.1.5.6.exe",
+  "installer_url": "https://github.com/Teobokki/ex-creator-studio/releases/download/v1.5.6/EX.CREATOR.STUDIO.Setup.1.5.6.exe",
+  "portable_url": "https://github.com/Teobokki/ex-creator-studio/releases/download/v1.5.6/EX.CREATOR.STUDIO.Portable.1.5.6.exe",
+  "release_url": "https://github.com/Teobokki/ex-creator-studio/releases/tag/v1.5.6",
+  "sha256": "4ddfc9f247ca7727175e3b937dc080e27d05185ef54800782031deed66ffa83a",
+  "portable_sha256": "a475423af02416e91f216029c645f500f33986626332108d7506474881442ea1",
+  "released": "2026-11-22",
+  "notes": "Lip sync fix: the moving mouth now sits exactly on the character's real lips (no more mouth under the lower lip or on the chin), on REX BOARD, EX STUDIO and the downloaded MP4. 3D-rendered characters get the natural rosy mouth with a soft dark-red gap and a hint of teeth. Portable is now a single standalone .exe."
 }
